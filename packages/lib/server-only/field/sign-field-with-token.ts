@@ -1,4 +1,10 @@
-import { DocumentStatus, FieldType, RecipientRole, SigningStatus } from '@prisma/client';
+import {
+  DocumentStatus,
+  FieldType,
+  RecipientRole,
+  SignatureLevel,
+  SigningStatus,
+} from '@prisma/client';
 import { DateTime } from 'luxon';
 import { isDeepEqual } from 'remeda';
 import { match } from 'ts-pattern';
@@ -27,6 +33,12 @@ import type { RequestMetadata } from '../../universal/extract-request-metadata';
 import { createDocumentAuditLogData } from '../../utils/document-audit-logs';
 import { validateFieldAuth } from '../document/validate-field-auth';
 
+export type Sign8SignatureData = {
+  signature: string; // CMS/PKCS#7 signature container from Sign8
+  credentialId: string;
+  pendingSignatureId: string;
+};
+
 export type SignFieldWithTokenOptions = {
   token: string;
   fieldId: number;
@@ -35,6 +47,7 @@ export type SignFieldWithTokenOptions = {
   userId?: number;
   authOptions?: TRecipientActionAuth;
   requestMetadata?: RequestMetadata;
+  sign8SignatureData?: Sign8SignatureData;
 };
 
 /**
@@ -55,6 +68,7 @@ export const signFieldWithToken = async ({
   userId,
   authOptions,
   requestMetadata,
+  sign8SignatureData,
 }: SignFieldWithTokenOptions) => {
   const recipient = await prisma.recipient.findFirstOrThrow({
     where: {
@@ -246,6 +260,10 @@ export const signFieldWithToken = async ({
     });
 
     if (isSignatureField) {
+      // Determine signature level from recipient
+      const signatureLevel = field.recipient.signatureLevel || SignatureLevel.SES;
+      const isQESSignature = signatureLevel === SignatureLevel.QES && sign8SignatureData;
+
       const signature = await tx.signature.upsert({
         where: {
           fieldId: field.id,
@@ -255,10 +273,18 @@ export const signFieldWithToken = async ({
           recipientId: field.recipientId,
           signatureImageAsBase64: signatureImageAsBase64,
           typedSignature: typedSignature,
+          signatureLevel: signatureLevel,
+          sign8SignatureData: isQESSignature ? sign8SignatureData.signature : null,
+          sign8PendingSignatureId: isQESSignature ? sign8SignatureData.pendingSignatureId : null,
+          sign8CredentialId: isQESSignature ? sign8SignatureData.credentialId : null,
         },
         update: {
           signatureImageAsBase64: signatureImageAsBase64,
           typedSignature: typedSignature,
+          signatureLevel: signatureLevel,
+          sign8SignatureData: isQESSignature ? sign8SignatureData.signature : null,
+          sign8PendingSignatureId: isQESSignature ? sign8SignatureData.pendingSignatureId : null,
+          sign8CredentialId: isQESSignature ? sign8SignatureData.credentialId : null,
         },
       });
 

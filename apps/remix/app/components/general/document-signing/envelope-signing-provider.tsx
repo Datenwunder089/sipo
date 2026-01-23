@@ -22,6 +22,11 @@ import { extractFieldInsertionValues } from '@documenso/lib/utils/envelope-signi
 import { trpc } from '@documenso/trpc/react';
 import type { TSignEnvelopeFieldValue } from '@documenso/trpc/server/envelope-router/sign-envelope-field.types';
 
+export type Sign8SignatureData = {
+  signature: string;
+  credentialId: string;
+};
+
 export type EnvelopeSigningContextValue = {
   isDirectTemplate: boolean;
 
@@ -31,6 +36,10 @@ export type EnvelopeSigningContextValue = {
   setEmail: (_value: string) => void;
   signature: string | null;
   setSignature: (_value: string | null) => void;
+
+  // Sign8 QES signature data
+  sign8SignatureData: Sign8SignatureData | null;
+  setSign8SignatureData: (_value: Sign8SignatureData | null) => void;
 
   showPendingFieldTooltip: boolean;
   setShowPendingFieldTooltip: (_value: boolean) => void;
@@ -96,6 +105,7 @@ export const EnvelopeSigningProvider = ({
 
   const [fullName, setFullName] = useState(initialFullName || '');
   const [email, setEmail] = useState(initialEmail || '');
+  const [sign8SignatureData, setSign8SignatureData] = useState<Sign8SignatureData | null>(null);
 
   const [showPendingFieldTooltip, setShowPendingFieldTooltip] = useState(false);
 
@@ -344,6 +354,10 @@ export const EnvelopeSigningProvider = ({
             // Dummy IDs.
             id: 0,
             fieldId: 0,
+            signatureLevel: null,
+            sign8SignatureData: null,
+            sign8PendingSignatureId: null,
+            sign8CredentialId: null,
           }
         : null;
     }
@@ -380,6 +394,8 @@ export const EnvelopeSigningProvider = ({
         setEmail,
         signature,
         setSignature,
+        sign8SignatureData,
+        setSign8SignatureData,
         envelopeData,
         envelope,
 

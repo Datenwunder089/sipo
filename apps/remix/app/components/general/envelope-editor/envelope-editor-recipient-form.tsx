@@ -10,7 +10,13 @@ import {
 import { zodResolver } from '@hookform/resolvers/zod';
 import { plural } from '@lingui/core/macro';
 import { Trans, useLingui } from '@lingui/react/macro';
-import { DocumentSigningOrder, EnvelopeType, RecipientRole, SendStatus } from '@prisma/client';
+import {
+  DocumentSigningOrder,
+  EnvelopeType,
+  RecipientRole,
+  SendStatus,
+  SignatureLevel,
+} from '@prisma/client';
 import { motion } from 'framer-motion';
 import { GripVerticalIcon, HelpCircleIcon, PlusIcon, SparklesIcon, TrashIcon } from 'lucide-react';
 import { useFieldArray, useForm, useWatch } from 'react-hook-form';
@@ -39,6 +45,7 @@ import {
   type RecipientAutoCompleteOption,
 } from '@documenso/ui/components/recipient/recipient-autocomplete-input';
 import { RecipientRoleSelect } from '@documenso/ui/components/recipient/recipient-role-select';
+import { RecipientSignatureLevelSelect } from '@documenso/ui/components/recipient/recipient-signature-level-select';
 import { cn } from '@documenso/ui/lib/utils';
 import { Button } from '@documenso/ui/primitives/button';
 import {
@@ -77,6 +84,7 @@ const ZEnvelopeRecipientsForm = z.object({
       role: z.nativeEnum(RecipientRole),
       signingOrder: z.number().optional(),
       actionAuth: z.array(ZRecipientActionAuthTypesSchema).optional().default([]),
+      signatureLevel: z.nativeEnum(SignatureLevel).default(SignatureLevel.SES),
     }),
   ),
   signingOrder: z.nativeEnum(DocumentSigningOrder),
@@ -169,6 +177,7 @@ export const EnvelopeEditorRecipientForm = () => {
       role: RecipientRole.SIGNER,
       signingOrder: 1,
       actionAuth: [],
+      signatureLevel: SignatureLevel.SES,
     },
   ];
 
@@ -188,6 +197,7 @@ export const EnvelopeEditorRecipientForm = () => {
                 signingOrder: recipient.signingOrder ?? index + 1,
                 actionAuth:
                   ZRecipientAuthOptionsSchema.parse(recipient.authOptions)?.actionAuth ?? undefined,
+                signatureLevel: recipient.signatureLevel ?? SignatureLevel.SES,
               })),
               [prop('signingOrder'), 'asc'],
               [prop('id'), 'asc'],
@@ -292,6 +302,7 @@ export const EnvelopeEditorRecipientForm = () => {
       role: RecipientRole.SIGNER,
       actionAuth: [],
       signingOrder: signers.length > 0 ? (signers[signers.length - 1]?.signingOrder ?? 0) + 1 : 1,
+      signatureLevel: SignatureLevel.SES,
     });
   };
 
@@ -314,6 +325,7 @@ export const EnvelopeEditorRecipientForm = () => {
           role: recipient.role,
           actionAuth: [],
           signingOrder: index + 1,
+          signatureLevel: SignatureLevel.SES,
         })),
         {
           shouldValidate: true,
@@ -344,6 +356,7 @@ export const EnvelopeEditorRecipientForm = () => {
         role: recipient.role,
         actionAuth: [],
         signingOrder: nextSigningOrder,
+        signatureLevel: SignatureLevel.SES,
       });
 
       nextSigningOrder += 1;
@@ -414,6 +427,7 @@ export const EnvelopeEditorRecipientForm = () => {
           actionAuth: [],
           signingOrder:
             signers.length > 0 ? (signers[signers.length - 1]?.signingOrder ?? 0) + 1 : 1,
+          signatureLevel: SignatureLevel.SES,
         },
         {
           shouldFocus: true,
@@ -630,6 +644,7 @@ export const EnvelopeEditorRecipientForm = () => {
           signer.name !== recipient.name ||
           signer.role !== recipient.role ||
           signer.signingOrder !== recipient.signingOrder ||
+          signer.signatureLevel !== recipient.signatureLevel ||
           !isDeepEqual(signerActionAuth, recipientActionAuth)
         );
       });
@@ -1051,6 +1066,36 @@ export const EnvelopeEditorRecipientForm = () => {
                                     </FormItem>
                                   )}
                                 />
+
+                                {watchedSigners[index]?.role === RecipientRole.SIGNER && (
+                                  <FormField
+                                    control={form.control}
+                                    name={`signers.${index}.signatureLevel`}
+                                    render={({ field }) => (
+                                      <FormItem
+                                        className={cn('mt-auto w-fit', {
+                                          'mb-6':
+                                            form.formState.errors.signers?.[index] &&
+                                            !form.formState.errors.signers[index]?.signatureLevel,
+                                        })}
+                                      >
+                                        <FormControl>
+                                          <RecipientSignatureLevelSelect
+                                            {...field}
+                                            onValueChange={field.onChange}
+                                            disabled={
+                                              snapshot.isDragging ||
+                                              isSubmitting ||
+                                              !canRecipientBeModified(signer.id)
+                                            }
+                                          />
+                                        </FormControl>
+
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+                                )}
 
                                 <Button
                                   variant="ghost"

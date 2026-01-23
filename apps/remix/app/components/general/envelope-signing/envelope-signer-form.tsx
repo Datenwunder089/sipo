@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 
 import { Plural, Trans } from '@lingui/react/macro';
-import { FieldType, RecipientRole } from '@prisma/client';
+import { FieldType, RecipientRole, SignatureLevel } from '@prisma/client';
 
 import { Input } from '@documenso/ui/primitives/input';
 import { Label } from '@documenso/ui/primitives/label';
@@ -10,6 +10,7 @@ import { SignaturePadDialog } from '@documenso/ui/primitives/signature-pad/signa
 
 import { useEmbedSigningContext } from '~/components/embed/embed-signing-context';
 
+import { DocumentSigningSign8QES } from '../document-signing/document-signing-sign8-qes';
 import { useRequiredEnvelopeSigningContext } from '../document-signing/envelope-signing-provider';
 
 export default function EnvelopeSignerForm() {
@@ -25,6 +26,8 @@ export default function EnvelopeSignerForm() {
     assistantRecipients,
     selectedAssistantRecipient,
     setSelectedAssistantRecipientId,
+    sign8SignatureData,
+    setSign8SignatureData,
   } = useRequiredEnvelopeSigningContext();
 
   const { isNameLocked, isEmailLocked } = useEmbedSigningContext() || {};
@@ -34,6 +37,13 @@ export default function EnvelopeSignerForm() {
   }, [recipientFields]);
 
   const isSubmitting = false;
+
+  // Check if recipient requires QES signing
+  const isQESRecipient = recipient.signatureLevel === SignatureLevel.QES;
+
+  const handleSign8Complete = (signatureData: { signature: string; credentialId: string }) => {
+    setSign8SignatureData?.(signatureData);
+  };
 
   if (recipient.role === RecipientRole.VIEWER) {
     return null;
@@ -88,6 +98,39 @@ export default function EnvelopeSignerForm() {
               </div>
             ))}
         </RadioGroup>
+      </fieldset>
+    );
+  }
+
+  // For QES recipients, show the Sign8 signing component
+  if (isQESRecipient && hasSignatureField) {
+    return (
+      <fieldset disabled={isSubmitting} className="flex flex-1 flex-col gap-4">
+        <div className="flex flex-1 flex-col gap-y-4">
+          <div>
+            <Label htmlFor="full-name">
+              <Trans>Full Name</Trans>
+            </Label>
+
+            <Input
+              type="text"
+              id="full-name"
+              className="mt-2 bg-background"
+              value={fullName}
+              disabled={isNameLocked}
+              onChange={(e) => !isNameLocked && setFullName(e.target.value.trimStart())}
+            />
+          </div>
+
+          <DocumentSigningSign8QES
+            recipientToken={recipient.token}
+            recipientName={recipient.name}
+            recipientEmail={recipient.email}
+            signatureLevel={recipient.signatureLevel}
+            onSign8Complete={handleSign8Complete}
+            disabled={isSubmitting}
+          />
+        </div>
       </fieldset>
     );
   }

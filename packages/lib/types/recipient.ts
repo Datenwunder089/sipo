@@ -1,4 +1,5 @@
 import { msg } from '@lingui/core/macro';
+import { SignatureLevel } from '@prisma/client';
 import { z } from 'zod';
 
 import { RecipientSchema } from '@documenso/prisma/generated/zod/modelSchema/RecipientSchema';
@@ -6,6 +7,15 @@ import { TeamSchema } from '@documenso/prisma/generated/zod/modelSchema/TeamSche
 import { UserSchema } from '@documenso/prisma/generated/zod/modelSchema/UserSchema';
 
 import { ZFieldSchema } from './field';
+
+/**
+ * Signature level schema for recipient signatures.
+ * - SES: Simple Electronic Signature (drawn/typed signature)
+ * - AES: Advanced Electronic Signature (enhanced authentication)
+ * - QES: Qualified Electronic Signature (Sign8 remote signing)
+ */
+export const ZSignatureLevelSchema = z.nativeEnum(SignatureLevel);
+export type TSignatureLevel = z.infer<typeof ZSignatureLevelSchema>;
 
 /**
  * The full recipient response schema.
@@ -28,6 +38,7 @@ export const ZRecipientSchema = RecipientSchema.pick({
   authOptions: true,
   signingOrder: true,
   rejectionReason: true,
+  signatureLevel: true,
 }).extend({
   fields: ZFieldSchema.array(),
 
@@ -55,6 +66,7 @@ export const ZRecipientLiteSchema = RecipientSchema.pick({
   authOptions: true,
   signingOrder: true,
   rejectionReason: true,
+  signatureLevel: true,
 }).extend({
   // Backwards compatibility.
   documentId: z.number().nullish(),
@@ -80,6 +92,7 @@ export const ZRecipientManySchema = RecipientSchema.pick({
   authOptions: true,
   signingOrder: true,
   rejectionReason: true,
+  signatureLevel: true,
 }).extend({
   user: UserSchema.pick({
     id: true,

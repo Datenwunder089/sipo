@@ -1,4 +1,10 @@
-import { DocumentStatus, FieldType, RecipientRole, SigningStatus } from '@prisma/client';
+import {
+  DocumentStatus,
+  FieldType,
+  RecipientRole,
+  SignatureLevel,
+  SigningStatus,
+} from '@prisma/client';
 import { match } from 'ts-pattern';
 
 import { isBase64Image } from '@documenso/lib/constants/signatures';
@@ -219,6 +225,12 @@ export const signEnvelopeFieldRoute = procedure
       });
 
       if (field.type === FieldType.SIGNATURE) {
+        // Determine signature level from recipient
+        const signatureLevel = field.recipient.signatureLevel || SignatureLevel.SES;
+        const sign8SignatureData =
+          fieldValue.type === FieldType.SIGNATURE ? fieldValue.sign8SignatureData : undefined;
+        const isQESSignature = signatureLevel === SignatureLevel.QES && sign8SignatureData;
+
         const signature = await tx.signature.upsert({
           where: {
             fieldId: field.id,
@@ -228,10 +240,14 @@ export const signEnvelopeFieldRoute = procedure
             recipientId: field.recipientId,
             signatureImageAsBase64: signatureImageAsBase64,
             typedSignature: typedSignature,
+            signatureLevel: signatureLevel,
+            sign8SignatureData: isQESSignature ? sign8SignatureData.signature : null,
           },
           update: {
             signatureImageAsBase64: signatureImageAsBase64,
             typedSignature: typedSignature,
+            signatureLevel: signatureLevel,
+            sign8SignatureData: isQESSignature ? sign8SignatureData.signature : null,
           },
         });
 

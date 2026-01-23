@@ -12,6 +12,7 @@ import {
   DocumentStatus,
   EnvelopeType,
   RecipientRole,
+  SignatureLevel,
   SigningStatus,
   WebhookTriggerEvents,
 } from '@prisma/client';
@@ -24,6 +25,7 @@ import { generateAuditLogPdf } from '@documenso/lib/server-only/pdf/generate-aud
 import { generateCertificatePdf } from '@documenso/lib/server-only/pdf/generate-certificate-pdf';
 import { prisma } from '@documenso/prisma';
 import { signPdf } from '@documenso/signing';
+import { extractQESSignatures } from '@documenso/signing/helpers/embed-external-signature';
 
 import { NEXT_PRIVATE_USE_PLAYWRIGHT_PDF } from '../../../constants/app';
 import { PDF_SIZE_A4_72PPI } from '../../../constants/pdf';
@@ -280,6 +282,23 @@ export const run = async ({
         },
       });
 
+      // Extract QES signatures for audit logging
+      const recipientsWithFields = await tx.recipient.findMany({
+        where: {
+          envelopeId: envelope.id,
+          signatureLevel: SignatureLevel.QES,
+        },
+        include: {
+          fields: {
+            include: {
+              signature: true,
+            },
+          },
+        },
+      });
+
+      const qesSignatures = extractQESSignatures(recipientsWithFields);
+
       await tx.documentAuditLog.create({
         data: createDocumentAuditLogData({
           type: DOCUMENT_AUDIT_LOG_TYPE.DOCUMENT_COMPLETED,
@@ -289,6 +308,16 @@ export const run = async ({
           data: {
             transactionId: nanoid(),
             ...(isRejected ? { isRejected: true, rejectionReason: rejectionReason } : {}),
+            ...(qesSignatures.length > 0
+              ? {
+                  qesSignatures: qesSignatures.map((sig) => ({
+                    recipientName: sig.recipientName,
+                    recipientEmail: sig.recipientEmail,
+                    signatureLevel: sig.signatureLevel,
+                    signedAt: sig.signedAt.toISOString(),
+                  })),
+                }
+              : {}),
           },
         }),
       });
