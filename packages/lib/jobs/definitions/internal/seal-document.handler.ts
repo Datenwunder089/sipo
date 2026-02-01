@@ -11,6 +11,7 @@ import type { DocumentData, Envelope, EnvelopeItem, Field } from '@prisma/client
 import {
   DocumentStatus,
   EnvelopeType,
+  FieldType,
   RecipientRole,
   SignatureLevel,
   SigningStatus,
@@ -21,7 +22,6 @@ import path from 'node:path';
 import { groupBy } from 'remeda';
 import { match } from 'ts-pattern';
 
-import { generateAuditLogPdf } from '@documenso/lib/server-only/pdf/generate-audit-log-pdf';
 import { generateCertificatePdf } from '@documenso/lib/server-only/pdf/generate-certificate-pdf';
 import { prisma } from '@documenso/prisma';
 import { signPdf } from '@documenso/signing';
@@ -31,7 +31,6 @@ import { NEXT_PRIVATE_USE_PLAYWRIGHT_PDF } from '../../../constants/app';
 import { PDF_SIZE_A4_72PPI } from '../../../constants/pdf';
 import { AppError, AppErrorCode } from '../../../errors/app-error';
 import { sendCompletedEmail } from '../../../server-only/document/send-completed-email';
-import { getAuditLogsPdf } from '../../../server-only/htmltopdf/get-audit-logs-pdf';
 import { getCertificatePdf } from '../../../server-only/htmltopdf/get-certificate-pdf';
 import { addRejectionStampToPdf } from '../../../server-only/pdf/add-rejection-stamp-to-pdf';
 import { flattenAnnotations } from '../../../server-only/pdf/flatten-annotations';
@@ -184,9 +183,8 @@ export const run = async ({
     }
 
     let certificateDoc: PDFDocument | null = null;
-    let auditLogDoc: PDFDocument | null = null;
 
-    if (settings.includeSigningCertificate || settings.includeAuditLog) {
+    if (settings.includeSigningCertificate) {
       const certificatePayload = {
         envelope,
         recipients: envelope.recipients, // Need to use the recipients from envelope which contains ALL recipients.
@@ -205,32 +203,37 @@ export const run = async ({
       // This is a temporary toggle while we validate the Konva-based approach.
       const usePlaywrightPdf = NEXT_PRIVATE_USE_PLAYWRIGHT_PDF();
 
-      const makeCertificatePdf = async () =>
-        usePlaywrightPdf
-          ? getCertificatePdf({
-              documentId,
-              language: envelope.documentMeta.language,
-            }).then(async (buffer) => PDFDocument.load(buffer))
-          : generateCertificatePdf(certificatePayload);
-
-      const makeAuditLogPdf = async () =>
-        usePlaywrightPdf
-          ? getAuditLogsPdf({
-              documentId,
-              language: envelope.documentMeta.language,
-            }).then(async (buffer) => PDFDocument.load(buffer))
-          : generateAuditLogPdf(certificatePayload);
-
-      const [createdCertificatePdf, createdAuditLogPdf] = await Promise.all([
-        settings.includeSigningCertificate ? makeCertificatePdf() : null,
-        settings.includeAuditLog ? makeAuditLogPdf() : null,
-      ]);
-
-      certificateDoc = createdCertificatePdf;
-      auditLogDoc = createdAuditLogPdf;
+      certificateDoc = usePlaywrightPdf
+        ? await getCertificatePdf({
+            documentId,
+            language: envelope.documentMeta.language,
+          }).then(async (buffer) => PDFDocument.load(buffer))
+        : await generateCertificatePdf(certificatePayload);
     }
 
     const newDocumentData: Array<{ oldDocumentDataId: string; newDocumentDataId: string }> = [];
+
+    // Query for QES pending signatures that contain signed PDFs
+    const qesRecipientIds = envelope.recipients
+      .filter((r) => r.signatureLevel === SignatureLevel.QES)
+      .map((r) => r.id);
+
+    const qesPendingSignatures = await prisma.sign8QESPendingSignature.findMany({
+      where: {
+        recipientId: {
+          in: qesRecipientIds,
+        },
+      },
+      select: {
+        id: true,
+        recipientId: true,
+        preparedPdfData: true,
+      },
+    });
+
+    // Get the first QES-signed PDF if available (there should only be one per document)
+    const qesSignedPdfData =
+      qesPendingSignatures.length > 0 ? qesPendingSignatures[0].preparedPdfData : null;
 
     for (const envelopeItem of envelopeItems) {
       const envelopeItemFields = envelope.envelopeItems.find(
@@ -248,7 +251,7 @@ export const run = async ({
         isRejected,
         rejectionReason,
         certificateDoc,
-        auditLogDoc,
+        qesSignedPdfData,
       });
 
       newDocumentData.push(result);
@@ -321,6 +324,17 @@ export const run = async ({
           },
         }),
       });
+
+      // Clean up QES pending signatures after successful sealing
+      if (qesPendingSignatures.length > 0) {
+        await tx.sign8QESPendingSignature.deleteMany({
+          where: {
+            id: {
+              in: qesPendingSignatures.map((sig) => sig.id),
+            },
+          },
+        });
+      }
     });
 
     return {
@@ -372,7 +386,7 @@ type DecorateAndSignPdfOptions = {
   isRejected: boolean;
   rejectionReason: string;
   certificateDoc: PDFDocument | null;
-  auditLogDoc: PDFDocument | null;
+  qesSignedPdfData: string | null;
 };
 
 /**
@@ -385,10 +399,32 @@ const decorateAndSignPdf = async ({
   isRejected,
   rejectionReason,
   certificateDoc,
-  auditLogDoc,
+  qesSignedPdfData,
 }: DecorateAndSignPdfOptions) => {
-  const pdfData = await getFileServerSide(envelopeItem.documentData);
+  const hasQesSignedPdf = qesSignedPdfData !== null;
 
+  // CRITICAL: QES-signed PDF must NOT be modified in any way to preserve
+  // the cryptographic signature. Return it directly.
+  if (hasQesSignedPdf) {
+    const pdfBuffer = Buffer.from(qesSignedPdfData, 'base64');
+
+    const { name } = path.parse(envelopeItem.title);
+    const suffix = isRejected ? '_rejected.pdf' : '_signed.pdf';
+
+    const newDocumentData = await putPdfFileServerSide({
+      name: `${name}${suffix}`,
+      type: 'application/pdf',
+      arrayBuffer: async () => Promise.resolve(pdfBuffer),
+    });
+
+    return {
+      oldDocumentDataId: envelopeItem.documentData.id,
+      newDocumentDataId: newDocumentData.id,
+    };
+  }
+
+  // Normal flow for non-QES PDFs
+  const pdfData = await getFileServerSide(envelopeItem.documentData);
   const pdfDoc = await PDFDocument.load(pdfData);
 
   // Normalize and flatten layers that could cause issues with the signature
@@ -408,14 +444,6 @@ const decorateAndSignPdf = async ({
     );
 
     certificatePages.forEach((page) => {
-      pdfDoc.addPage(page);
-    });
-  }
-
-  if (auditLogDoc) {
-    const auditLogPages = await pdfDoc.copyPages(auditLogDoc, auditLogDoc.getPageIndices());
-
-    auditLogPages.forEach((page) => {
       pdfDoc.addPage(page);
     });
   }
@@ -519,7 +547,62 @@ const decorateAndSignPdf = async ({
 
   const pdfBytes = await pdfDoc.save();
 
-  const pdfBuffer = await signPdf({ pdf: Buffer.from(pdfBytes) });
+  // Collect all inserted signature field positions for clickable widgets
+  const signatureFields: Array<{
+    page: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }> = [];
+
+  try {
+    const sigFields = envelopeItemFields.filter(
+      (field) =>
+        (field.type === FieldType.SIGNATURE || field.type === FieldType.FREE_SIGNATURE) &&
+        field.inserted,
+    );
+
+    for (const field of sigFields) {
+      const widthPercent = Number(field.width);
+      const heightPercent = Number(field.height);
+
+      // Skip fields with invalid dimensions (default is -1)
+      if (widthPercent <= 0 || heightPercent <= 0) {
+        continue;
+      }
+
+      const pageIndex = field.page - 1;
+      if (pageIndex < 0 || pageIndex >= pdfDoc.getPageCount()) {
+        continue;
+      }
+
+      const page = pdfDoc.getPage(pageIndex);
+      const { width: pageWidth, height: pageHeight } = getPageSize(page);
+
+      // Field dimensions are stored as percentages (0-100)
+      const fieldWidth = (widthPercent / 100) * pageWidth;
+      const fieldHeight = (heightPercent / 100) * pageHeight;
+
+      // Convert from frontend coordinates (origin top-left) to PDF coordinates (origin bottom-left)
+      const fieldX = (Number(field.positionX) / 100) * pageWidth;
+      const fieldY = pageHeight - (Number(field.positionY) / 100) * pageHeight - fieldHeight;
+
+      signatureFields.push({
+        page: field.page,
+        x: fieldX,
+        y: fieldY,
+        width: fieldWidth,
+        height: fieldHeight,
+      });
+    }
+  } catch (error) {
+    console.error('Error collecting signature field positions:', error);
+    // Continue with empty signatureFields - will use fallback invisible widget
+  }
+
+  // Sign with organization certificate
+  const pdfBuffer = await signPdf({ pdf: Buffer.from(pdfBytes), signatureFields });
 
   const { name } = path.parse(envelopeItem.title);
 

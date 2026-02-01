@@ -1,9 +1,13 @@
+import { PDFDocument } from '@cantoo/pdf-lib';
+import { FieldType } from '@prisma/client';
 import crypto from 'node:crypto';
 import { redirect } from 'react-router';
 
+import { insertFieldsIntoPdf } from '@documenso/lib/server-only/pdf/insert-fields-into-pdf';
 import { getSign8AuthorizationUrl } from '@documenso/lib/server-only/sign8/sign8-oauth';
 import { getFileServerSide } from '@documenso/lib/universal/upload/get-file.server';
 import { prisma } from '@documenso/prisma';
+import type { FieldWithSignature } from '@documenso/prisma/types/field-with-signature';
 import { addSigningPlaceholder } from '@documenso/signing/helpers/add-signing-placeholder';
 import { updateSigningPlaceholder } from '@documenso/signing/helpers/update-signing-placeholder';
 
@@ -12,9 +16,11 @@ import type { Route } from './+types/sign8.authorize';
 /**
  * API endpoint to initiate Sign8 OAuth flow for QES signing
  *
- * Query Parameters:
+ * POST Body (form data):
  * - token: The recipient token
  * - returnUrl: URL to redirect to after signing
+ * - fullName: Optional full name for visual signature
+ * - signature: Optional signature (base64 image or text)
  *
  * Flow (CAdES detached - documentDigests approach):
  * 1. Get the original PDF
@@ -27,10 +33,13 @@ import type { Route } from './+types/sign8.authorize';
  * 8. Sign8 returns CMS/PKCS#7 signature (SignatureObject)
  * 9. Embed CMS signature into prepared PDF at placeholder position
  */
-export const loader = async ({ request }: Route.LoaderArgs) => {
-  const url = new URL(request.url);
-  const token = url.searchParams.get('token');
-  const returnUrl = url.searchParams.get('returnUrl');
+export const action = async ({ request }: Route.ActionArgs) => {
+  // Parse form data from POST body
+  const formData = await request.formData();
+  const token = formData.get('token') as string | null;
+  const returnUrl = formData.get('returnUrl') as string | null;
+  const fullName = formData.get('fullName') as string | null;
+  const signatureParam = formData.get('signature') as string | null;
 
   if (!token) {
     return Response.json({ error: 'Missing recipient token' }, { status: 400 });
@@ -40,13 +49,19 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
     return Response.json({ error: 'Missing return URL' }, { status: 400 });
   }
 
-  // Get the recipient with envelope and document data
+  // Get the recipient with envelope, document data, and fields
   const recipient = await prisma.recipient.findFirst({
     where: { token },
     select: {
       id: true,
+      name: true,
       signatureLevel: true,
       signingStatus: true,
+      fields: {
+        include: {
+          signature: true,
+        },
+      },
       envelope: {
         select: {
           id: true,
@@ -69,9 +84,10 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
     return Response.json({ error: 'Recipient not found' }, { status: 404 });
   }
 
-  if (recipient.signatureLevel !== 'QES') {
+  // Only allow QES and AES signature levels for Sign8 signing
+  if (recipient.signatureLevel !== 'QES' && recipient.signatureLevel !== 'AES') {
     return Response.json(
-      { error: 'This recipient is not configured for QES signing' },
+      { error: 'This recipient is not configured for QES or AES signing' },
       { status: 400 },
     );
   }
@@ -88,13 +104,109 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
   try {
     // Get the actual PDF file content
     const pdfContent = await getFileServerSide(firstEnvelopeItem.documentData);
-    const pdfBuffer = Buffer.isBuffer(pdfContent) ? pdfContent : Buffer.from(pdfContent);
+    let pdfBuffer = Buffer.isBuffer(pdfContent) ? pdfContent : Buffer.from(pdfContent);
 
     console.log('Sign8 authorize - Original PDF size:', pdfBuffer.length, 'bytes');
 
+    // Prepare fields for visual rendering
+    // Determine if signature is base64 image or text
+    const isBase64Signature = signatureParam?.startsWith('data:image/');
+    const signatureValue = signatureParam || fullName || recipient.name || 'QES Signature';
+
+    // Build virtual "inserted" fields for visual rendering
+    const fieldsToRender: FieldWithSignature[] = recipient.fields
+      .filter((field) => field.type === FieldType.SIGNATURE)
+      .map((field) => ({
+        ...field,
+        inserted: true,
+        customText: isBase64Signature ? '' : signatureValue,
+        signature: {
+          id: 0,
+          created: new Date(),
+          recipientId: recipient.id,
+          fieldId: field.id,
+          // Use base64 image if provided, otherwise null
+          signatureImageAsBase64: isBase64Signature ? signatureParam : null,
+          // Use typed text if not base64
+          typedSignature: isBase64Signature ? null : signatureValue,
+          signatureLevel: recipient.signatureLevel,
+          sign8SignatureData: null,
+          sign8PendingSignatureId: null,
+          sign8CredentialId: null,
+        },
+      }));
+
+    console.log('Sign8 authorize - Fields to render:', fieldsToRender.length);
+
+    // Insert visual signature appearances into the PDF
+    if (fieldsToRender.length > 0) {
+      pdfBuffer = await insertFieldsIntoPdf({
+        pdf: pdfBuffer,
+        fields: fieldsToRender,
+      });
+      console.log('Sign8 authorize - PDF with fields size:', pdfBuffer.length, 'bytes');
+    }
+
     // CAdES detached flow: Prepare PDF with signature placeholder
+    // Collect ALL signature field positions for clickable areas
+    const signatureFieldsFromRecipient = recipient.fields.filter(
+      (f) => f.type === FieldType.SIGNATURE,
+    );
+
+    // Convert field positions to PDF coordinates
+    // Note: Field positions are stored as percentages of page size
+    // PDF coordinates are from bottom-left in points
+    const signatureFieldPositions: Array<{
+      page: number;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    }> = [];
+
+    if (signatureFieldsFromRecipient.length > 0) {
+      // Get PDF page dimensions
+      const pdfDoc = await PDFDocument.load(pdfBuffer);
+
+      for (const signatureField of signatureFieldsFromRecipient) {
+        const page = pdfDoc.getPage(signatureField.page - 1);
+        const { width: pageWidth, height: pageHeight } = page.getSize();
+
+        // Convert percentage to PDF points
+        // positionX/Y are percentages (0-100), width/height are also percentages
+        // Convert Decimal types to numbers
+        const fieldPosX = Number(signatureField.positionX);
+        const fieldPosY = Number(signatureField.positionY);
+        const fieldWidth = Number(signatureField.width);
+        const fieldHeight = Number(signatureField.height);
+
+        // Skip fields with invalid dimensions
+        if (fieldWidth <= 0 || fieldHeight <= 0) {
+          continue;
+        }
+
+        const x = (fieldPosX / 100) * pageWidth;
+        const y = pageHeight - (fieldPosY / 100) * pageHeight - (fieldHeight / 100) * pageHeight; // Flip Y coordinate
+        const width = (fieldWidth / 100) * pageWidth;
+        const height = (fieldHeight / 100) * pageHeight;
+
+        signatureFieldPositions.push({
+          page: signatureField.page,
+          x,
+          y,
+          width,
+          height,
+        });
+      }
+
+      console.log('Sign8 authorize - Signature field positions:', signatureFieldPositions);
+    }
+
     // Step 1: Add signing placeholder (empty signature container)
-    const pdfWithPlaceholder = await addSigningPlaceholder({ pdf: pdfBuffer });
+    const pdfWithPlaceholder = await addSigningPlaceholder({
+      pdf: pdfBuffer,
+      signatureFields: signatureFieldPositions.length > 0 ? signatureFieldPositions : undefined,
+    });
     console.log('Sign8 authorize - PDF with placeholder size:', pdfWithPlaceholder.length, 'bytes');
 
     // Step 2: Update placeholder to calculate ByteRange offsets
@@ -137,6 +249,7 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
       documentHash,
       returnUrl,
       pendingSignatureId: pendingSignature.id,
+      signatureLevel: recipient.signatureLevel as 'QES' | 'AES',
     });
 
     console.log('Sign8 authorize - Redirecting to:', authorizationUrl);

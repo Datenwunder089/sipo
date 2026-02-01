@@ -3,14 +3,19 @@ import fs from 'node:fs';
 import { env } from '@documenso/lib/utils/env';
 import { signWithGCloud } from '@documenso/pdf-sign';
 
+import type { SignatureFieldPosition } from '../helpers/add-signing-placeholder';
 import { addSigningPlaceholder } from '../helpers/add-signing-placeholder';
 import { updateSigningPlaceholder } from '../helpers/update-signing-placeholder';
 
 export type SignWithGoogleCloudHSMOptions = {
   pdf: Buffer;
+  signatureFields?: SignatureFieldPosition[];
 };
 
-export const signWithGoogleCloudHSM = async ({ pdf }: SignWithGoogleCloudHSMOptions) => {
+export const signWithGoogleCloudHSM = async ({
+  pdf,
+  signatureFields,
+}: SignWithGoogleCloudHSMOptions) => {
   const keyPath = env('NEXT_PRIVATE_SIGNING_GCLOUD_HSM_KEY_PATH');
 
   if (!keyPath) {
@@ -33,7 +38,7 @@ export const signWithGoogleCloudHSM = async ({ pdf }: SignWithGoogleCloudHSMOpti
   }
 
   const { pdf: pdfWithPlaceholder, byteRange } = updateSigningPlaceholder({
-    pdf: await addSigningPlaceholder({ pdf }),
+    pdf: await addSigningPlaceholder({ pdf, signatureFields }),
   });
 
   const pdfWithoutSignature = Buffer.concat([

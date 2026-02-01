@@ -242,12 +242,16 @@ export const signEnvelopeFieldRoute = procedure
             typedSignature: typedSignature,
             signatureLevel: signatureLevel,
             sign8SignatureData: isQESSignature ? sign8SignatureData.signature : null,
+            sign8PendingSignatureId: isQESSignature ? sign8SignatureData.pendingSignatureId : null,
+            sign8CredentialId: isQESSignature ? sign8SignatureData.credentialId : null,
           },
           update: {
             signatureImageAsBase64: signatureImageAsBase64,
             typedSignature: typedSignature,
             signatureLevel: signatureLevel,
             sign8SignatureData: isQESSignature ? sign8SignatureData.signature : null,
+            sign8PendingSignatureId: isQESSignature ? sign8SignatureData.pendingSignatureId : null,
+            sign8CredentialId: isQESSignature ? sign8SignatureData.credentialId : null,
           },
         });
 

@@ -49,6 +49,7 @@ export const ZSignEnvelopeFieldValue = z.discriminatedUnion('type', [
       .object({
         signature: z.string(),
         credentialId: z.string(),
+        pendingSignatureId: z.string(),
       })
       .optional(),
   }),

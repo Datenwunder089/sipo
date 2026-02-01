@@ -4,16 +4,18 @@ import { getCertificateStatus } from '@documenso/lib/server-only/cert/cert-statu
 import { env } from '@documenso/lib/utils/env';
 import { signWithP12 } from '@documenso/pdf-sign';
 
+import type { SignatureFieldPosition } from '../helpers/add-signing-placeholder';
 import { addSigningPlaceholder } from '../helpers/add-signing-placeholder';
 import { updateSigningPlaceholder } from '../helpers/update-signing-placeholder';
 
 export type SignWithLocalCertOptions = {
   pdf: Buffer;
+  signatureFields?: SignatureFieldPosition[];
 };
 
-export const signWithLocalCert = async ({ pdf }: SignWithLocalCertOptions) => {
+export const signWithLocalCert = async ({ pdf, signatureFields }: SignWithLocalCertOptions) => {
   const { pdf: pdfWithPlaceholder, byteRange } = updateSigningPlaceholder({
-    pdf: await addSigningPlaceholder({ pdf }),
+    pdf: await addSigningPlaceholder({ pdf, signatureFields }),
   });
 
   const pdfWithoutSignature = Buffer.concat([

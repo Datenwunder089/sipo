@@ -4,11 +4,13 @@ import crypto from 'node:crypto';
 import { env } from '@documenso/lib/utils/env';
 
 import { createSign8Client } from '../clients/sign8-csc';
+import type { SignatureFieldPosition } from '../helpers/add-signing-placeholder';
 import { addSigningPlaceholder } from '../helpers/add-signing-placeholder';
 import { updateSigningPlaceholder } from '../helpers/update-signing-placeholder';
 
 export type SignWithSign8CSCOptions = {
   pdf: Buffer;
+  signatureFields?: SignatureFieldPosition[];
 };
 
 /**
@@ -228,7 +230,10 @@ export const createCMSSignedData = (options: {
  * - NEXT_PRIVATE_SIGNING_SIGN8_CREDENTIAL_ID: Specific credential to use
  * - NEXT_PRIVATE_SIGNING_SIGN8_PIN: PIN for credential authorization
  */
-export const signWithSign8CSC = async ({ pdf }: SignWithSign8CSCOptions): Promise<Buffer> => {
+export const signWithSign8CSC = async ({
+  pdf,
+  signatureFields,
+}: SignWithSign8CSCOptions): Promise<Buffer> => {
   // Validate required configuration
   const baseUrl = env('NEXT_PRIVATE_SIGNING_SIGN8_BASE_URL');
   const clientId = env('NEXT_PRIVATE_SIGNING_SIGN8_CLIENT_ID');
@@ -253,7 +258,7 @@ export const signWithSign8CSC = async ({ pdf }: SignWithSign8CSCOptions): Promis
 
   // Prepare PDF with signing placeholder
   const { pdf: pdfWithPlaceholder, byteRange } = updateSigningPlaceholder({
-    pdf: await addSigningPlaceholder({ pdf }),
+    pdf: await addSigningPlaceholder({ pdf, signatureFields }),
   });
 
   // Extract content to be signed (excluding the signature placeholder)

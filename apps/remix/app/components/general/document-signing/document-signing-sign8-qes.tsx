@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 
 import { Trans, useLingui } from '@lingui/react/macro';
 import { SignatureLevel } from '@prisma/client';
-import { BadgeCheckIcon, ExternalLinkIcon, Loader2Icon, ShieldAlertIcon } from 'lucide-react';
-import { useLocation, useSearchParams } from 'react-router';
+import { BadgeCheckIcon, ShieldAlertIcon } from 'lucide-react';
+import { useSearchParams } from 'react-router';
 
 import { Alert, AlertDescription, AlertTitle } from '@documenso/ui/primitives/alert';
-import { Button } from '@documenso/ui/primitives/button';
 import { useToast } from '@documenso/ui/primitives/use-toast';
 
+import { useRequiredEnvelopeSigningContext } from './envelope-signing-provider';
+
 export type DocumentSigningSign8QESProps = {
-  recipientToken: string;
   recipientName: string;
   recipientEmail: string;
   signatureLevel: SignatureLevel;
@@ -18,42 +18,87 @@ export type DocumentSigningSign8QESProps = {
     signature: string;
     credentialId: string;
     pendingSignatureId: string;
-    hasSignedPdf?: boolean; // True when Sign8 returned a fully signed PDF (PAdES)
-  }) => void;
+    hasSignedPdf?: boolean;
+  }) => void | Promise<void>;
   onSign8Error?: (error: string) => void;
-  disabled?: boolean;
 };
 
 export const DocumentSigningSign8QES = ({
-  recipientToken,
   recipientName,
   recipientEmail,
   signatureLevel,
   onSign8Complete,
   onSign8Error,
-  disabled = false,
 }: DocumentSigningSign8QESProps) => {
   const { t } = useLingui();
   const { toast } = useToast();
-  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [isAuthenticating, setIsAuthenticating] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [sign8Error, setSign8Error] = useState<string | null>(null);
+  const { sign8FlowState, setSign8FlowState } = useRequiredEnvelopeSigningContext();
 
-  // Check if we're returning from Sign8 OAuth
-  const sign8Success = searchParams.get('sign8_success');
-  const sign8Signature = searchParams.get('sign8_signature');
-  const sign8SignedPdf = searchParams.get('sign8_signed_pdf');
-  const sign8Credential = searchParams.get('sign8_credential');
-  const sign8PendingId = searchParams.get('sign8_pending_id');
-  const sign8ErrorParam = searchParams.get('sign8_error');
-  const sign8ErrorMessage = searchParams.get('sign8_error_message');
+  // Refs to prevent double-processing and capture initial params
+  const processedCallbackRef = useRef(false);
+  const initialParamsRef = useRef<{
+    sign8Success: string | null;
+    sign8Signature: string | null;
+    sign8SignedPdf: string | null;
+    sign8Credential: string | null;
+    sign8PendingId: string | null;
+    sign8ErrorParam: string | null;
+    sign8ErrorMessage: string | null;
+  } | null>(null);
 
-  // Handle Sign8 callback parameters
+  // Capture params on mount
+  if (initialParamsRef.current === null) {
+    initialParamsRef.current = {
+      sign8Success: searchParams.get('sign8_success'),
+      sign8Signature: searchParams.get('sign8_signature'),
+      sign8SignedPdf: searchParams.get('sign8_signed_pdf'),
+      sign8Credential: searchParams.get('sign8_credential'),
+      sign8PendingId: searchParams.get('sign8_pending_id'),
+      sign8ErrorParam: searchParams.get('sign8_error'),
+      sign8ErrorMessage: searchParams.get('sign8_error_message'),
+    };
+  }
+
+  // Check if we're in the middle of a Sign8 callback (used for early loading state)
+  const isSign8CallbackPending = useMemo(() => {
+    const params = initialParamsRef.current;
+    if (!params || processedCallbackRef.current) return false;
+
+    const hasSignature = params.sign8Signature !== null;
+    const hasSignedPdf = params.sign8SignedPdf === 'true';
+
+    return (
+      (params.sign8Success === 'true' &&
+        (hasSignature || hasSignedPdf) &&
+        params.sign8Credential &&
+        params.sign8PendingId) ||
+      params.sign8ErrorParam === 'true'
+    );
+  }, []);
+
+  // Handle Sign8 callback parameters - runs once on mount
   useEffect(() => {
-    // Success case: we have either a signature (CAdES) or a signed PDF (PAdES)
+    if (processedCallbackRef.current) {
+      return;
+    }
+
+    const params = initialParamsRef.current;
+    if (!params) {
+      return;
+    }
+
+    const {
+      sign8Success,
+      sign8Signature,
+      sign8SignedPdf,
+      sign8Credential,
+      sign8PendingId,
+      sign8ErrorParam,
+      sign8ErrorMessage,
+    } = params;
+
     const hasSignature = sign8Signature !== null;
     const hasSignedPdf = sign8SignedPdf === 'true';
 
@@ -63,39 +108,82 @@ export const DocumentSigningSign8QES = ({
       sign8Credential &&
       sign8PendingId
     ) {
-      // Clear the URL parameters
-      const newParams = new URLSearchParams(searchParams);
-      newParams.delete('sign8_success');
-      newParams.delete('sign8_signature');
-      newParams.delete('sign8_signed_pdf');
-      newParams.delete('sign8_credential');
-      newParams.delete('sign8_pending_id');
-      setSearchParams(newParams, { replace: true });
+      processedCallbackRef.current = true;
 
-      // Mark as authenticated and notify parent
-      setIsAuthenticated(true);
-      onSign8Complete({
-        signature: sign8Signature || '',
-        credentialId: sign8Credential,
-        pendingSignatureId: sign8PendingId,
-        hasSignedPdf,
+      // Create cleanup function but DON'T call yet
+      const cleanupParams = () => {
+        const newParams = new URLSearchParams(window.location.search);
+        newParams.delete('sign8_success');
+        newParams.delete('sign8_signature');
+        newParams.delete('sign8_signed_pdf');
+        newParams.delete('sign8_credential');
+        newParams.delete('sign8_pending_id');
+        setSearchParams(newParams, { replace: true });
+      };
+
+      // Start the unified flow
+      setSign8FlowState({
+        step: 'verifying',
+        progress: 10,
+        fieldsCompleted: 0,
+        fieldsTotal: 0,
+        error: null,
       });
 
-      toast({
-        title: t`Signed with Sign8`,
-        description: t`Your qualified electronic signature has been applied.`,
-      });
+      const executeFlow = async () => {
+        try {
+          await onSign8Complete({
+            signature: sign8Signature || '',
+            credentialId: sign8Credential,
+            pendingSignatureId: sign8PendingId,
+            hasSignedPdf,
+          });
+
+          // Success state will be set by the complete dialog after document completion
+          // Clean up params only after successful completion
+          cleanupParams();
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : t`Failed to sign fields`;
+
+          setSign8FlowState({
+            step: 'error',
+            progress: 0,
+            fieldsCompleted: 0,
+            fieldsTotal: 0,
+            error: errorMsg,
+          });
+
+          toast({
+            title: t`Sign8 Error`,
+            description: errorMsg,
+            variant: 'destructive',
+          });
+
+          // Clean up params on error too
+          cleanupParams();
+        }
+      };
+
+      void executeFlow();
     } else if (sign8ErrorParam === 'true') {
+      processedCallbackRef.current = true;
+
       const errorMsg = sign8ErrorMessage || t`Failed to sign with Sign8`;
 
-      // Clear the URL parameters
-      const newParams = new URLSearchParams(searchParams);
+      // Clean the URL parameters for error case
+      const newParams = new URLSearchParams(window.location.search);
       newParams.delete('sign8_error');
       newParams.delete('sign8_error_message');
       setSearchParams(newParams, { replace: true });
 
-      setSign8Error(errorMsg);
-      setIsAuthenticating(false);
+      setSign8FlowState({
+        step: 'error',
+        progress: 0,
+        fieldsCompleted: 0,
+        fieldsTotal: 0,
+        error: errorMsg,
+      });
+
       onSign8Error?.(errorMsg);
 
       toast({
@@ -104,121 +192,108 @@ export const DocumentSigningSign8QES = ({
         variant: 'destructive',
       });
     }
-  }, [
-    sign8Success,
-    sign8Signature,
-    sign8SignedPdf,
-    sign8Credential,
-    sign8PendingId,
-    sign8ErrorParam,
-    sign8ErrorMessage,
-    searchParams,
-    setSearchParams,
-    onSign8Complete,
-    onSign8Error,
-    toast,
-    t,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const handleSign8Auth = useCallback(() => {
-    setIsAuthenticating(true);
-    setSign8Error(null);
-
-    // Build the return URL (current page)
-    const returnUrl = `${window.location.origin}${location.pathname}`;
-
-    // Build the Sign8 authorize URL
-    // The document hash is computed server-side for security
-    const authorizeUrl = new URL('/api/sign8/authorize', window.location.origin);
-    authorizeUrl.searchParams.set('token', recipientToken);
-    authorizeUrl.searchParams.set('returnUrl', returnUrl);
-
-    // Redirect to Sign8 OAuth
-    window.location.href = authorizeUrl.toString();
-  }, [location.pathname, recipientToken]);
-
-  // Only show for QES recipients
-  if (signatureLevel !== SignatureLevel.QES) {
+  // Only show for QES and AES recipients (both use Sign8)
+  if (signatureLevel !== SignatureLevel.QES && signatureLevel !== SignatureLevel.AES) {
     return null;
   }
 
-  if (isAuthenticated) {
-    return (
-      <Alert className="border-green-500 bg-green-50 dark:bg-green-950">
-        <BadgeCheckIcon className="h-5 w-5 text-green-600" />
-        <AlertTitle className="text-green-800 dark:text-green-200">
-          <Trans>Qualified Electronic Signature Applied</Trans>
-        </AlertTitle>
-        <AlertDescription className="text-green-700 dark:text-green-300">
-          <Trans>
-            Your document has been signed with a qualified electronic signature via Sign8. This
-            signature is legally equivalent to a handwritten signature under eIDAS.
-          </Trans>
-        </AlertDescription>
-      </Alert>
-    );
+  const isQES = signatureLevel === SignatureLevel.QES;
+
+  // When flow is active (not idle and not error), the overlay handles display
+  // Also hide if we're waiting for Sign8 callback to be processed (prevents hopping)
+  if (sign8FlowState.step !== 'idle' && sign8FlowState.step !== 'error') {
+    return null;
   }
 
-  return (
-    <div className="space-y-4">
-      <Alert className="border-blue-500 bg-blue-50 dark:bg-blue-950">
-        <BadgeCheckIcon className="h-5 w-5 text-blue-600" />
-        <AlertTitle className="text-blue-800 dark:text-blue-200">
-          <Trans>Qualified Electronic Signature (QES) Required</Trans>
-        </AlertTitle>
-        <AlertDescription className="text-blue-700 dark:text-blue-300">
-          <Trans>
-            This document requires a qualified electronic signature. You will be redirected to Sign8
-            to authenticate with your qualified certificate and sign the document.
-          </Trans>
-        </AlertDescription>
-      </Alert>
+  // If Sign8 callback is pending (params in URL but not yet processed), show nothing
+  // The overlay will show once the useEffect processes the params
+  if (isSign8CallbackPending && sign8FlowState.step === 'idle') {
+    return null;
+  }
 
-      {sign8Error && (
+  // Show error state if there was an error
+  if (sign8FlowState.step === 'error') {
+    return (
+      <div className="space-y-4">
+        <Alert className="border-blue-500 bg-blue-50 dark:bg-blue-950">
+          <BadgeCheckIcon className="h-5 w-5 text-blue-600" />
+          <AlertTitle className="text-blue-800 dark:text-blue-200">
+            {isQES ? (
+              <Trans>Qualified Electronic Signature (QES) Required</Trans>
+            ) : (
+              <Trans>Advanced Electronic Signature (AES) Required</Trans>
+            )}
+          </AlertTitle>
+          <AlertDescription className="text-blue-700 dark:text-blue-300">
+            {isQES ? (
+              <Trans>
+                This document requires a qualified electronic signature. Click "Complete" to be
+                redirected to Sign8 where you will authenticate with your qualified certificate.
+              </Trans>
+            ) : (
+              <Trans>
+                This document requires an advanced electronic signature. Click "Complete" to be
+                redirected to Sign8 where you will authenticate securely.
+              </Trans>
+            )}
+          </AlertDescription>
+        </Alert>
+
         <Alert variant="destructive">
           <ShieldAlertIcon className="h-5 w-5" />
           <AlertTitle>
             <Trans>Sign8 Authentication Failed</Trans>
           </AlertTitle>
-          <AlertDescription>{sign8Error}</AlertDescription>
+          <AlertDescription>{sign8FlowState.error}</AlertDescription>
         </Alert>
-      )}
 
-      <div className="rounded-lg border bg-card p-4">
-        <div className="mb-4">
+        <div className="rounded-lg border bg-card p-4">
           <h3 className="text-sm font-medium text-muted-foreground">
             <Trans>Signing as</Trans>
           </h3>
           <p className="text-base font-semibold">{recipientName}</p>
           <p className="text-sm text-muted-foreground">{recipientEmail}</p>
         </div>
+      </div>
+    );
+  }
 
-        <Button
-          onClick={handleSign8Auth}
-          disabled={disabled || isAuthenticating}
-          className="w-full"
-          size="lg"
-        >
-          {isAuthenticating ? (
-            <>
-              <Loader2Icon className="mr-2 h-4 w-4 animate-spin" />
-              <Trans>Redirecting to Sign8...</Trans>
-            </>
+  // Default idle state - show info about signature requirement
+  return (
+    <div className="space-y-4">
+      <Alert className="border-blue-500 bg-blue-50 dark:bg-blue-950">
+        <BadgeCheckIcon className="h-5 w-5 text-blue-600" />
+        <AlertTitle className="text-blue-800 dark:text-blue-200">
+          {isQES ? (
+            <Trans>Qualified Electronic Signature (QES) Required</Trans>
           ) : (
-            <>
-              <BadgeCheckIcon className="mr-2 h-4 w-4" />
-              <Trans>Sign with Sign8 (QES)</Trans>
-              <ExternalLinkIcon className="ml-2 h-3 w-3" />
-            </>
+            <Trans>Advanced Electronic Signature (AES) Required</Trans>
           )}
-        </Button>
+        </AlertTitle>
+        <AlertDescription className="text-blue-700 dark:text-blue-300">
+          {isQES ? (
+            <Trans>
+              This document requires a qualified electronic signature. Click "Complete" to be
+              redirected to Sign8 where you will authenticate with your qualified certificate.
+            </Trans>
+          ) : (
+            <Trans>
+              This document requires an advanced electronic signature. Click "Complete" to be
+              redirected to Sign8 where you will authenticate securely.
+            </Trans>
+          )}
+        </AlertDescription>
+      </Alert>
 
-        <p className="mt-3 text-center text-xs text-muted-foreground">
-          <Trans>
-            You will be redirected to Sign8 to authenticate with your qualified certificate. After
-            authentication, you will be returned here to complete the signing process.
-          </Trans>
-        </p>
+      <div className="rounded-lg border bg-card p-4">
+        <h3 className="text-sm font-medium text-muted-foreground">
+          <Trans>Signing as</Trans>
+        </h3>
+        <p className="text-base font-semibold">{recipientName}</p>
+        <p className="text-sm text-muted-foreground">{recipientEmail}</p>
       </div>
     </div>
   );

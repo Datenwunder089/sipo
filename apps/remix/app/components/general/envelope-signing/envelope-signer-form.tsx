@@ -12,6 +12,7 @@ import { useEmbedSigningContext } from '~/components/embed/embed-signing-context
 
 import { DocumentSigningSign8QES } from '../document-signing/document-signing-sign8-qes';
 import { useRequiredEnvelopeSigningContext } from '../document-signing/envelope-signing-provider';
+import { Sign8CompletionOverlay } from '../document-signing/sign8-completion-overlay';
 
 export default function EnvelopeSignerForm() {
   const {
@@ -26,11 +27,13 @@ export default function EnvelopeSignerForm() {
     assistantRecipients,
     selectedAssistantRecipient,
     setSelectedAssistantRecipientId,
-    sign8SignatureData,
     setSign8SignatureData,
+    signField,
+    sign8FlowState,
+    setSign8FlowState,
   } = useRequiredEnvelopeSigningContext();
 
-  const { isNameLocked, isEmailLocked } = useEmbedSigningContext() || {};
+  const { isNameLocked } = useEmbedSigningContext() || {};
 
   const hasSignatureField = useMemo(() => {
     return recipientFields.some((field) => field.type === FieldType.SIGNATURE);
@@ -38,11 +41,58 @@ export default function EnvelopeSignerForm() {
 
   const isSubmitting = false;
 
-  // Check if recipient requires QES signing
+  // Check if recipient requires QES or AES signing (both use Sign8)
   const isQESRecipient = recipient.signatureLevel === SignatureLevel.QES;
+  const isAESRecipient = recipient.signatureLevel === SignatureLevel.AES;
+  const requiresSign8 = isQESRecipient || isAESRecipient;
 
-  const handleSign8Complete = (signatureData: { signature: string; credentialId: string }) => {
+  const handleSign8Complete = async (signatureData: {
+    signature: string;
+    credentialId: string;
+    pendingSignatureId: string;
+  }) => {
     setSign8SignatureData?.(signatureData);
+
+    // Auto-sign all unsigned signature fields with QES data in parallel
+    const unsignedSignatureFields = recipientFields.filter(
+      (f) => f.type === FieldType.SIGNATURE && !f.inserted,
+    );
+
+    const totalFields = unsignedSignatureFields.length;
+
+    // Update flow state to applying
+    setSign8FlowState({
+      step: 'applying',
+      progress: 20,
+      fieldsCompleted: 0,
+      fieldsTotal: totalFields,
+      error: null,
+    });
+
+    // Sign all fields in parallel
+    await Promise.all(
+      unsignedSignatureFields.map(async (field, index) => {
+        await signField(field.id, {
+          type: FieldType.SIGNATURE,
+          value: fullName || recipient.name || 'QES Signature',
+          sign8SignatureData: signatureData,
+        });
+
+        // Update progress after each field completes
+        setSign8FlowState((prev) => ({
+          ...prev,
+          fieldsCompleted: prev.fieldsCompleted + 1,
+          progress: 20 + ((index + 1) / totalFields) * 50,
+        }));
+      }),
+    );
+
+    // Move to completing state
+    setSign8FlowState((prev) => ({
+      ...prev,
+      step: 'completing',
+      progress: 80,
+    }));
   };
 
   if (recipient.role === RecipientRole.VIEWER) {
@@ -102,36 +152,37 @@ export default function EnvelopeSignerForm() {
     );
   }
 
-  // For QES recipients, show the Sign8 signing component
-  if (isQESRecipient && hasSignatureField) {
+  // For QES and AES recipients, show the Sign8 signing component
+  if (requiresSign8 && hasSignatureField) {
     return (
-      <fieldset disabled={isSubmitting} className="flex flex-1 flex-col gap-4">
-        <div className="flex flex-1 flex-col gap-y-4">
-          <div>
-            <Label htmlFor="full-name">
-              <Trans>Full Name</Trans>
-            </Label>
+      <>
+        <Sign8CompletionOverlay state={sign8FlowState} />
+        <fieldset disabled={isSubmitting} className="flex flex-1 flex-col gap-4">
+          <div className="flex flex-1 flex-col gap-y-4">
+            <div>
+              <Label htmlFor="full-name">
+                <Trans>Full Name</Trans>
+              </Label>
 
-            <Input
-              type="text"
-              id="full-name"
-              className="mt-2 bg-background"
-              value={fullName}
-              disabled={isNameLocked}
-              onChange={(e) => !isNameLocked && setFullName(e.target.value.trimStart())}
+              <Input
+                type="text"
+                id="full-name"
+                className="mt-2 bg-background"
+                value={fullName}
+                disabled={isNameLocked}
+                onChange={(e) => !isNameLocked && setFullName(e.target.value.trimStart())}
+              />
+            </div>
+
+            <DocumentSigningSign8QES
+              recipientName={recipient.name}
+              recipientEmail={recipient.email}
+              signatureLevel={recipient.signatureLevel}
+              onSign8Complete={handleSign8Complete}
             />
           </div>
-
-          <DocumentSigningSign8QES
-            recipientToken={recipient.token}
-            recipientName={recipient.name}
-            recipientEmail={recipient.email}
-            signatureLevel={recipient.signatureLevel}
-            onSign8Complete={handleSign8Complete}
-            disabled={isSubmitting}
-          />
-        </div>
-      </fieldset>
+        </fieldset>
+      </>
     );
   }
 

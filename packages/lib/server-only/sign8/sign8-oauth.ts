@@ -148,6 +148,7 @@ export const getSign8AuthorizationUrl = (options: {
   documentHash: string;
   returnUrl: string;
   pendingSignatureId: string;
+  signatureLevel?: 'QES' | 'AES';
 }): string => {
   const config = getSign8OAuthConfig();
 
@@ -173,6 +174,11 @@ export const getSign8AuthorizationUrl = (options: {
   console.log('Sign8 auth URL - hash Standard Base64:', options.documentHash);
   console.log('Sign8 auth URL - hash Base64URL:', hashBase64Url);
 
+  // Determine the signature qualifier based on signature level
+  // QES = Qualified Electronic Signature (eu_eidas_qes)
+  // AES = Advanced Electronic Signature (eu_eidas_aes)
+  const signatureQualifier = options.signatureLevel === 'AES' ? 'eu_eidas_aes' : 'eu_eidas_qes';
+
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: config.clientId,
@@ -183,7 +189,7 @@ export const getSign8AuthorizationUrl = (options: {
     code_challenge: codeChallenge,
     code_challenge_method: 'S256',
     // CSC spec parameters for credential authorization
-    signatureQualifier: 'eu_eidas_qes', // Required for QES signing
+    signatureQualifier, // eu_eidas_qes for QES, eu_eidas_aes for AES
     numSignatures: '1',
     hashes: hashBase64Url, // Base64URL format (NOT URL-encoded Standard Base64)
     hashAlgorithmOID: '2.16.840.1.101.3.4.2.1', // SHA-256 OID (to match signDoc with digest)
@@ -507,15 +513,47 @@ export const signDocWithDigests = async (options: {
   }
 
   const signData = (await signResponse.json()) as {
-    SignatureObject?: Array<{ signature: string }>;
+    SignatureObject?: Array<
+      string | { signature?: string; Signature?: string; signatureValue?: string }
+    >;
     signatures?: string[];
   };
 
   console.log('Sign8 signDocWithDigests response keys:', Object.keys(signData));
+  console.log('Sign8 signDocWithDigests full response:', JSON.stringify(signData, null, 2));
 
   // Extract CMS signatures from SignatureObject
+  // Sign8 CSC API can return SignatureObject in different formats:
+  // 1. Array of strings: ["base64sig1", "base64sig2"]
+  // 2. Array of objects with signature property: [{signature: "base64sig"}]
+  // 3. Array of objects with Signature property: [{Signature: "base64sig"}]
   if (signData.SignatureObject && signData.SignatureObject.length > 0) {
-    const signatures = signData.SignatureObject.map((s) => s.signature);
+    console.log(
+      'Sign8 signDocWithDigests - SignatureObject structure:',
+      JSON.stringify(signData.SignatureObject, null, 2),
+    );
+    console.log(
+      'Sign8 signDocWithDigests - SignatureObject[0] type:',
+      typeof signData.SignatureObject[0],
+    );
+
+    const signatures = signData.SignatureObject.map((s) => {
+      // If it's a string directly, return it
+      if (typeof s === 'string') {
+        return s;
+      }
+      // Try different property names (CSC API implementations vary)
+      const sig = s.signature || s.Signature || s.signatureValue;
+      if (!sig) {
+        console.error(
+          'Sign8 signDocWithDigests - Unknown SignatureObject structure:',
+          JSON.stringify(s),
+        );
+        throw new Error(`Unknown SignatureObject structure: ${JSON.stringify(s)}`);
+      }
+      return sig;
+    });
+
     console.log('Sign8 signDocWithDigests - Got', signatures.length, 'signature(s)');
     return { signatures };
   }
@@ -575,11 +613,14 @@ export const getSign8CertificateInfo = async (
 
   const data = (await response.json()) as {
     cert: { certificates: string[] } & Record<string, unknown>;
-    key?: { algo?: string; len?: number };
+    key?: { algo?: string | string[]; len?: number };
     authInfo?: { signAlgo?: string[] };
   };
 
   console.log('Sign8 credentials/info response:', JSON.stringify(data, null, 2));
+
+  // key.algo can be a string or array - normalize to string
+  const keyAlgo = Array.isArray(data.key?.algo) ? data.key.algo[0] : data.key?.algo;
 
   return {
     certificates: data.cert?.certificates || [],
@@ -587,7 +628,7 @@ export const getSign8CertificateInfo = async (
     subjectDN: data.cert?.subjectDN as string | undefined,
     validFrom: data.cert?.validFrom as string | undefined,
     validTo: data.cert?.validTo as string | undefined,
-    keyAlgo: data.key?.algo, // Key algorithm (RSA, ECDSA, etc.)
+    keyAlgo, // Key algorithm OID (e.g., 1.2.840.113549.1.1.1 for RSA)
     signAlgo: data.authInfo?.signAlgo, // Supported signing algorithm OIDs from authInfo
   };
 };

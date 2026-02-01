@@ -147,13 +147,11 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
     console.log('Sign8 callback - Sign algo (from authInfo):', certInfo.signAlgo);
     console.log('Sign8 callback - Certificates count:', certInfo.certificates?.length || 0);
 
-    // Use keyAlgo from credentials/info response
-    // This is the key algorithm OID which determines the signing algorithm
-    // For ECDSA keys (1.2.840.10045.4.3.2), we use ECDSA signing
-    // For RSA keys, we would use RSA signing
-    const keyAlgoArray = Array.isArray(certInfo.keyAlgo) ? certInfo.keyAlgo : [certInfo.keyAlgo];
-    const signAlgo = keyAlgoArray[0] || '1.2.840.10045.4.3.2'; // Default to ECDSA
-    console.log('Sign8 callback - Using signAlgo (from keyAlgo):', signAlgo);
+    // Use keyAlgo from credentials/info response directly as signAlgo
+    // Sign8 expects the key algorithm OID (e.g., 1.2.840.113549.1.1.1 for RSA)
+    // The hash algorithm is specified separately via hashAlgorithmOID
+    const signAlgo = certInfo.keyAlgo || '1.2.840.113549.1.1.1'; // Default to RSA
+    console.log('Sign8 callback - Using signAlgo:', signAlgo);
 
     // Get the prepared PDF (with placeholder) and ByteRange from pending signature
     const preparedPdfBase64 = pendingSignature.preparedPdfData;
