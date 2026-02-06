@@ -213,15 +213,17 @@ export const run = async ({
 
     const newDocumentData: Array<{ oldDocumentDataId: string; newDocumentDataId: string }> = [];
 
-    // Query for QES pending signatures that contain signed PDFs
-    const qesRecipientIds = envelope.recipients
-      .filter((r) => r.signatureLevel === SignatureLevel.QES)
+    // Query for Sign8 pending signatures that contain signed PDFs (QES or AES)
+    const sign8RecipientIds = envelope.recipients
+      .filter(
+        (r) => r.signatureLevel === SignatureLevel.QES || r.signatureLevel === SignatureLevel.AES,
+      )
       .map((r) => r.id);
 
-    const qesPendingSignatures = await prisma.sign8QESPendingSignature.findMany({
+    const sign8PendingSignatures = await prisma.sign8QESPendingSignature.findMany({
       where: {
         recipientId: {
-          in: qesRecipientIds,
+          in: sign8RecipientIds,
         },
       },
       select: {
@@ -231,9 +233,9 @@ export const run = async ({
       },
     });
 
-    // Get the first QES-signed PDF if available (there should only be one per document)
+    // Get the first Sign8-signed PDF if available (there should only be one per document)
     const qesSignedPdfData =
-      qesPendingSignatures.length > 0 ? qesPendingSignatures[0].preparedPdfData : null;
+      sign8PendingSignatures.length > 0 ? sign8PendingSignatures[0].preparedPdfData : null;
 
     for (const envelopeItem of envelopeItems) {
       const envelopeItemFields = envelope.envelopeItems.find(
@@ -252,6 +254,7 @@ export const run = async ({
         rejectionReason,
         certificateDoc,
         qesSignedPdfData,
+        qesRecipientIds: sign8RecipientIds,
       });
 
       newDocumentData.push(result);
@@ -285,11 +288,13 @@ export const run = async ({
         },
       });
 
-      // Extract QES signatures for audit logging
+      // Extract Sign8 signatures (QES, AES) for audit logging
       const recipientsWithFields = await tx.recipient.findMany({
         where: {
           envelopeId: envelope.id,
-          signatureLevel: SignatureLevel.QES,
+          signatureLevel: {
+            in: [SignatureLevel.QES, SignatureLevel.AES],
+          },
         },
         include: {
           fields: {
@@ -325,12 +330,12 @@ export const run = async ({
         }),
       });
 
-      // Clean up QES pending signatures after successful sealing
-      if (qesPendingSignatures.length > 0) {
+      // Clean up Sign8 pending signatures after successful sealing
+      if (sign8PendingSignatures.length > 0) {
         await tx.sign8QESPendingSignature.deleteMany({
           where: {
             id: {
-              in: qesPendingSignatures.map((sig) => sig.id),
+              in: sign8PendingSignatures.map((sig) => sig.id),
             },
           },
         });
@@ -387,6 +392,7 @@ type DecorateAndSignPdfOptions = {
   rejectionReason: string;
   certificateDoc: PDFDocument | null;
   qesSignedPdfData: string | null;
+  qesRecipientIds: number[];
 };
 
 /**
@@ -400,32 +406,24 @@ const decorateAndSignPdf = async ({
   rejectionReason,
   certificateDoc,
   qesSignedPdfData,
+  qesRecipientIds,
 }: DecorateAndSignPdfOptions) => {
-  const hasQesSignedPdf = qesSignedPdfData !== null;
+  let pdfDoc: PDFDocument;
+  let fieldsToInsert: typeof envelopeItemFields;
 
-  // CRITICAL: QES-signed PDF must NOT be modified in any way to preserve
-  // the cryptographic signature. Return it directly.
-  if (hasQesSignedPdf) {
-    const pdfBuffer = Buffer.from(qesSignedPdfData, 'base64');
-
-    const { name } = path.parse(envelopeItem.title);
-    const suffix = isRejected ? '_rejected.pdf' : '_signed.pdf';
-
-    const newDocumentData = await putPdfFileServerSide({
-      name: `${name}${suffix}`,
-      type: 'application/pdf',
-      arrayBuffer: async () => Promise.resolve(pdfBuffer),
-    });
-
-    return {
-      oldDocumentDataId: envelopeItem.documentData.id,
-      newDocumentDataId: newDocumentData.id,
-    };
+  if (qesSignedPdfData !== null) {
+    // QES-PDF as base (contains QES signature + fields rendered before QES signing)
+    pdfDoc = await PDFDocument.load(Buffer.from(qesSignedPdfData, 'base64'));
+    // Only insert fields that are NOT from QES/AES recipients
+    // (their fields are already rendered in the QES-prepared PDF)
+    fieldsToInsert = envelopeItemFields.filter(
+      (f) => f.inserted && !qesRecipientIds.includes(f.recipientId ?? 0),
+    );
+  } else {
+    const pdfData = await getFileServerSide(envelopeItem.documentData);
+    pdfDoc = await PDFDocument.load(pdfData);
+    fieldsToInsert = envelopeItemFields;
   }
-
-  // Normal flow for non-QES PDFs
-  const pdfData = await getFileServerSide(envelopeItem.documentData);
-  const pdfDoc = await PDFDocument.load(pdfData);
 
   // Normalize and flatten layers that could cause issues with the signature
   normalizeSignatureAppearances(pdfDoc);
@@ -450,7 +448,7 @@ const decorateAndSignPdf = async ({
 
   // Handle V1 and legacy insertions.
   if (envelope.internalVersion === 1) {
-    for (const field of envelopeItemFields) {
+    for (const field of fieldsToInsert) {
       if (field.inserted) {
         if (envelope.useLegacyFieldInsertion) {
           await legacy_insertFieldInPDF(pdfDoc, field);
@@ -463,7 +461,7 @@ const decorateAndSignPdf = async ({
 
   // Handle V2 envelope insertions.
   if (envelope.internalVersion === 2) {
-    const fieldsGroupedByPage = groupBy(envelopeItemFields, (field) => field.page);
+    const fieldsGroupedByPage = groupBy(fieldsToInsert, (field) => field.page);
 
     for (const [pageNumber, fields] of Object.entries(fieldsGroupedByPage)) {
       const page = pdfDoc.getPage(Number(pageNumber) - 1);

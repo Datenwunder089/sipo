@@ -85,6 +85,7 @@ export const action = async ({ request }: Route.ActionArgs) => {
   }
 
   // Only allow QES and AES signature levels for Sign8 signing
+  // SES (Simple Electronic Signature) does not require Sign8 - it uses local signing
   if (recipient.signatureLevel !== 'QES' && recipient.signatureLevel !== 'AES') {
     return Response.json(
       { error: 'This recipient is not configured for QES or AES signing' },
@@ -108,10 +109,33 @@ export const action = async ({ request }: Route.ActionArgs) => {
 
     console.log('Sign8 authorize - Original PDF size:', pdfBuffer.length, 'bytes');
 
+    // Render all already-inserted fields from OTHER recipients into the PDF
+    // so the QES-prepared PDF includes visual signatures from earlier signers.
+    const allInsertedFields = await prisma.field.findMany({
+      where: {
+        envelopeId: recipient.envelope!.id,
+        inserted: true,
+        recipientId: { not: recipient.id },
+      },
+      include: { signature: true },
+    });
+
+    if (allInsertedFields.length > 0) {
+      pdfBuffer = await insertFieldsIntoPdf({ pdf: pdfBuffer, fields: allInsertedFields });
+      console.log(
+        'Sign8 authorize - PDF with prior fields size:',
+        pdfBuffer.length,
+        'bytes',
+        '(rendered',
+        allInsertedFields.length,
+        'fields from other recipients)',
+      );
+    }
+
     // Prepare fields for visual rendering
     // Determine if signature is base64 image or text
     const isBase64Signature = signatureParam?.startsWith('data:image/');
-    const signatureValue = signatureParam || fullName || recipient.name || 'QES Signature';
+    const signatureValue = signatureParam || fullName || recipient.name || 'Digital Signature';
 
     // Build virtual "inserted" fields for visual rendering
     const fieldsToRender: FieldWithSignature[] = recipient.fields
