@@ -37,7 +37,7 @@ export const OrganisationAccountLinkConfirmationTemplate = ({
   const previewText =
     type === 'create'
       ? msg`A request has been made to create an account for you`
-      : msg`A request has been made to link your Documenso account`;
+      : msg`A request has been made to link your SIGN8 account`;
 
   return (
     <Html>
@@ -69,7 +69,7 @@ export const OrganisationAccountLinkConfirmationTemplate = ({
                 {type === 'create' ? (
                   <Trans>Account creation request</Trans>
                 ) : (
-                  <Trans>Link your Documenso account</Trans>
+                  <Trans>Link your SIGN8 account</Trans>
                 )}
               </Text>
 
@@ -82,43 +82,14 @@ export const OrganisationAccountLinkConfirmationTemplate = ({
                 ) : (
                   <Trans>
                     <span className="font-bold">{organisationName}</span> has requested to link your
-                    current Documenso account to their organisation.
+                    current SIGN8 account to their organisation.
                   </Trans>
                 )}
               </Text>
 
-              {/* Placeholder text if we want to have the warning in the email as well. */}
-              {/* <Section className="mt-6">
-                <Text className="my-0 text-sm">
-                  <Trans>
-                    By accepting this request, you will be granting{' '}
-                    <strong>{organisationName}</strong> full access to:
-                  </Trans>
-                </Text>
-
-                <ul className="mb-0 mt-2">
-                  <li className="text-sm">
-                    <Trans>Your account, and everything associated with it</Trans>
-                  </li>
-                  <li className="mt-1 text-sm">
-                    <Trans>Something something something</Trans>
-                  </li>
-                  <li className="mt-1 text-sm">
-                    <Trans>Something something something</Trans>
-                  </li>
-                </ul>
-
-                <Text className="mt-2 text-sm">
-                  <Trans>
-                    You can unlink your account at any time in your security settings on Documenso{' '}
-                    <Link href={`${assetBaseUrl}/settings/security/linked-accounts`}>here.</Link>
-                  </Trans>
-                </Text>
-              </Section> */}
-
               <Section className="mb-6 mt-8 text-center">
                 <Button
-                  className="bg-documenso-500 inline-flex items-center justify-center rounded-lg px-6 py-3 text-center text-sm font-medium text-black no-underline"
+                  className="inline-flex items-center justify-center rounded-lg bg-documenso-500 px-6 py-3 text-center text-sm font-medium text-black no-underline"
                   href={confirmationLink}
                 >
                   <Trans>Review request</Trans>

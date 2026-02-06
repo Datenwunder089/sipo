@@ -9,9 +9,9 @@ export const OpenAPIV1 = Object.assign(
     ApiContractV1,
     {
       info: {
-        title: 'Documenso API',
+        title: 'SIGN8 API',
         version: '1.0.0',
-        description: 'The Documenso API for retrieving, creating, updating and deleting documents.',
+        description: 'The SIGN8 API for retrieving, creating, updating and deleting documents.',
       },
       servers: [
         {

@@ -196,6 +196,7 @@ export const DocumentSigningSign8QES = ({
   }, []);
 
   // Only show for QES and AES recipients (both use Sign8)
+  // SES (Simple Electronic Signature) uses local signing without Sign8
   if (signatureLevel !== SignatureLevel.QES && signatureLevel !== SignatureLevel.AES) {
     return null;
   }

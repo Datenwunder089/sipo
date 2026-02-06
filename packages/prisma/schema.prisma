@@ -726,6 +726,9 @@ model Organisation {
   organisationAuthenticationPortalId String                           @unique
   organisationAuthenticationPortal   OrganisationAuthenticationPortal @relation(fields: [organisationAuthenticationPortalId], references: [id])
 
+  smtpSettings   OrganisationSmtpSettings?
+  emailTemplates OrganisationEmailTemplate[]
+
   @@index([name])
   @@index([ownerUserId])
 }
@@ -1099,4 +1102,56 @@ model OrganisationAuthenticationPortal {
 model Counter {
   id    String @id
   value Int
+}
+
+enum SmtpTransportType {
+  SMTP_AUTH
+  SMTP_API
+}
+
+model OrganisationSmtpSettings {
+  id             String            @id @default(cuid())
+  organisationId String            @unique
+  organisation   Organisation      @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  enabled        Boolean           @default(false)
+  transportType  SmtpTransportType @default(SMTP_AUTH)
+  host           String            @default("")
+  port           Int               @default(587)
+  secure         Boolean           @default(false)
+  username       String            @default("")
+  password       String            @default("")
+  apiKey         String            @default("")
+  apiKeyUser     String            @default("apikey")
+  fromName       String            @default("")
+  fromAddress    String            @default("")
+
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+}
+
+enum EmailTemplateType {
+  DOCUMENT_INVITE
+  DOCUMENT_COMPLETED
+  DOCUMENT_PENDING
+  DOCUMENT_REJECTED
+  DOCUMENT_CANCELLED
+  RECIPIENT_SIGNED
+}
+
+model OrganisationEmailTemplate {
+  id             String            @id @default(cuid())
+  organisationId String
+  organisation   Organisation      @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  type           EmailTemplateType
+  enabled        Boolean           @default(true)
+  subject        String?
+  body           String?
+
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@unique([organisationId, type])
+  @@index([organisationId])
 }

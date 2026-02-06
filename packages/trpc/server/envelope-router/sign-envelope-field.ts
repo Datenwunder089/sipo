@@ -229,7 +229,9 @@ export const signEnvelopeFieldRoute = procedure
         const signatureLevel = field.recipient.signatureLevel || SignatureLevel.SES;
         const sign8SignatureData =
           fieldValue.type === FieldType.SIGNATURE ? fieldValue.sign8SignatureData : undefined;
-        const isQESSignature = signatureLevel === SignatureLevel.QES && sign8SignatureData;
+
+        // Sign8 signature data is stored for QES and AES levels when present
+        const hasSign8Signature = !!sign8SignatureData;
 
         const signature = await tx.signature.upsert({
           where: {
@@ -241,17 +243,21 @@ export const signEnvelopeFieldRoute = procedure
             signatureImageAsBase64: signatureImageAsBase64,
             typedSignature: typedSignature,
             signatureLevel: signatureLevel,
-            sign8SignatureData: isQESSignature ? sign8SignatureData.signature : null,
-            sign8PendingSignatureId: isQESSignature ? sign8SignatureData.pendingSignatureId : null,
-            sign8CredentialId: isQESSignature ? sign8SignatureData.credentialId : null,
+            sign8SignatureData: hasSign8Signature ? sign8SignatureData.signature : null,
+            sign8PendingSignatureId: hasSign8Signature
+              ? sign8SignatureData.pendingSignatureId
+              : null,
+            sign8CredentialId: hasSign8Signature ? sign8SignatureData.credentialId : null,
           },
           update: {
             signatureImageAsBase64: signatureImageAsBase64,
             typedSignature: typedSignature,
             signatureLevel: signatureLevel,
-            sign8SignatureData: isQESSignature ? sign8SignatureData.signature : null,
-            sign8PendingSignatureId: isQESSignature ? sign8SignatureData.pendingSignatureId : null,
-            sign8CredentialId: isQESSignature ? sign8SignatureData.credentialId : null,
+            sign8SignatureData: hasSign8Signature ? sign8SignatureData.signature : null,
+            sign8PendingSignatureId: hasSign8Signature
+              ? sign8SignatureData.pendingSignatureId
+              : null,
+            sign8CredentialId: hasSign8Signature ? sign8SignatureData.credentialId : null,
           },
         });
 

@@ -41,7 +41,8 @@ export default function EnvelopeSignerForm() {
 
   const isSubmitting = false;
 
-  // Check if recipient requires QES or AES signing (both use Sign8)
+  // Check if recipient requires Sign8 signing (QES or AES)
+  // SES (Simple Electronic Signature) uses local signing without Sign8
   const isQESRecipient = recipient.signatureLevel === SignatureLevel.QES;
   const isAESRecipient = recipient.signatureLevel === SignatureLevel.AES;
   const requiresSign8 = isQESRecipient || isAESRecipient;
@@ -74,7 +75,7 @@ export default function EnvelopeSignerForm() {
       unsignedSignatureFields.map(async (field, index) => {
         await signField(field.id, {
           type: FieldType.SIGNATURE,
-          value: fullName || recipient.name || 'QES Signature',
+          value: fullName || recipient.name || 'Digital Signature',
           sign8SignatureData: signatureData,
         });
 
