@@ -191,7 +191,9 @@ msgstr ""
 
 #. placeholder {0}: _(FRIENDLY_FIELD_TYPE[fieldType as FieldType])
 #. placeholder {0}: route.label
+#. placeholder {0}: signatureLevel === SignatureLevel.QES ? 'Qualified Electronic Signature (QES) Required' : 'Advanced Electronic Signature (AES) Required'
 #: apps/remix/app/components/general/document-signing/document-signing-auto-sign.tsx
+#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
 #: apps/remix/app/routes/_authenticated+/t.$teamUrl+/settings._layout.tsx
 msgid "{0}"
 msgstr "{0}"
@@ -1297,11 +1299,6 @@ msgstr "Painel de Administração"
 #: packages/lib/constants/document-visibility.ts
 msgid "Admins only"
 msgstr "Apenas administradores"
-
-#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-msgid "Advanced Electronic Signature (AES) Required"
-msgstr ""
 
 #: packages/ui/components/recipient/recipient-signature-level-select.tsx
 msgid "Advanced Electronic Signature: Enhanced authentication with 2FA or passkey. Uniquely linked to the signatory and suitable for business contracts."
@@ -4790,10 +4787,6 @@ msgstr ""
 msgid "Failed to send test email."
 msgstr ""
 
-#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-msgid "Failed to sign fields"
-msgstr ""
-
 #: apps/remix/app/components/dialogs/session-logout-all-dialog.tsx
 msgid "Failed to sign out all sessions"
 msgstr "Falha ao sair de todas as sessões"
@@ -7167,8 +7160,7 @@ msgid "QES (Qualified)"
 msgstr ""
 
 #: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-msgid "Qualified Electronic Signature (QES) Required"
+msgid "Qualified Electronic Signature Applied"
 msgstr ""
 
 #: packages/ui/components/recipient/recipient-signature-level-select.tsx
@@ -7375,6 +7367,10 @@ msgstr "URL de Redirecionamento"
 #: apps/remix/app/routes/_authenticated+/t.$teamUrl+/documents.$id.edit.tsx
 msgid "Redirecting"
 msgstr "Redirecionando"
+
+#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
+msgid "Redirecting to Sign8..."
+msgstr ""
 
 #: apps/remix/app/components/general/document-signing/sign8-completion-overlay.tsx
 msgid "Redirecting..."
@@ -8311,10 +8307,13 @@ msgid "Sign Up with OIDC"
 msgstr "Inscrever-se com OIDC"
 
 #: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-msgid "Sign8 Authentication Failed"
+msgid "Sign with Sign8 ({signatureLevel})"
 msgstr ""
 
 #: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
+msgid "Sign8 Authentication Failed"
+msgstr ""
+
 #: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
 msgid "Sign8 Error"
 msgstr ""
@@ -8332,6 +8331,7 @@ msgstr ""
 #: apps/remix/app/components/general/document-signing/document-signing-form.tsx
 #: apps/remix/app/components/general/document-signing/document-signing-signature-field.tsx
 #: apps/remix/app/components/general/envelope-editor/envelope-editor-fields-drag-drop.tsx
+#: apps/remix/app/components/general/envelope-signing/envelope-signer-form.tsx
 #: apps/remix/app/components/general/envelope-signing/envelope-signer-form.tsx
 #: apps/remix/app/components/tables/admin-document-recipient-item-table.tsx
 #: apps/remix/app/routes/_internal+/[__htmltopdf]+/certificate.tsx
@@ -8386,6 +8386,10 @@ msgctxt "Signed document (adjective)"
 msgid "Signed"
 msgstr "Assinado"
 
+#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
+msgid "Signed with Sign8"
+msgstr ""
+
 #: apps/remix/app/components/general/envelope-signing/envelope-signer-header.tsx
 msgid "Signer"
 msgstr "Signatário"
@@ -8410,7 +8414,6 @@ msgctxt "Recipient role progressive verb"
 msgid "Signing"
 msgstr "Assinando"
 
-#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
 #: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
 msgid "Signing as"
 msgstr ""
@@ -9683,13 +9686,7 @@ msgid "This document is using legacy field insertion, we recommend using the new
 msgstr "Este documento está usando inserção de campo legada, recomendamos usar o novo método de inserção de campo para resultados mais precisos."
 
 #: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-msgid "This document requires a qualified electronic signature. Click \"Complete\" to be redirected to Sign8 where you will authenticate with your qualified certificate."
-msgstr ""
-
-#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-msgid "This document requires an advanced electronic signature. Click \"Complete\" to be redirected to Sign8 where you will authenticate securely."
+msgid "This document requires a qualified electronic signature. You will be redirected to Sign8 to authenticate with your qualified certificate and sign the document."
 msgstr ""
 
 #: apps/remix/app/components/general/template/template-page-view-documents-table.tsx
@@ -11827,6 +11824,10 @@ msgstr "Você precisa estar logado para visualizar esta página."
 msgid "You need to setup 2FA to mark this document as viewed."
 msgstr "Você precisa configurar a 2FA para marcar este documento como visualizado."
 
+#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
+msgid "You will be redirected to Sign8 to authenticate with your qualified certificate. After authentication, you will be returned here to complete the signing process."
+msgstr ""
+
 #: apps/remix/app/components/dialogs/admin-organisation-create-dialog.tsx
 msgid "You will need to configure any claims or subscription after creating this organisation"
 msgstr "Você precisará configurar quaisquer reivindicações ou assinaturas após criar esta organização"
@@ -11929,6 +11930,10 @@ msgstr "Seu documento foi reenviado com sucesso."
 #: apps/remix/app/components/general/document/document-edit-form.tsx
 msgid "Your document has been sent successfully."
 msgstr "Seu documento foi enviado com sucesso."
+
+#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
+msgid "Your document has been signed with a qualified electronic signature via Sign8. This signature is legally equivalent to a handwritten signature under eIDAS."
+msgstr ""
 
 #: apps/remix/app/components/dialogs/document-duplicate-dialog.tsx
 msgid "Your document has been successfully duplicated."
@@ -12058,6 +12063,10 @@ msgstr "Seu perfil foi atualizado."
 #: apps/remix/app/components/forms/public-profile-form.tsx
 msgid "Your public profile has been updated."
 msgstr "Seu perfil público foi atualizado."
+
+#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
+msgid "Your qualified electronic signature has been applied."
+msgstr ""
 
 #: apps/remix/app/components/forms/2fa/recovery-code-list.tsx
 msgid "Your recovery code has been copied to your clipboard."

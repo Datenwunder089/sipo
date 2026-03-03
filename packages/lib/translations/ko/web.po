@@ -196,7 +196,9 @@ msgstr "{0, plural, other {문서에서 수신자 #명을 발견했습니다.}}"
 
 #. placeholder {0}: _(FRIENDLY_FIELD_TYPE[fieldType as FieldType])
 #. placeholder {0}: route.label
+#. placeholder {0}: signatureLevel === SignatureLevel.QES ? 'Qualified Electronic Signature (QES) Required' : 'Advanced Electronic Signature (AES) Required'
 #: apps/remix/app/components/general/document-signing/document-signing-auto-sign.tsx
+#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
 #: apps/remix/app/routes/_authenticated+/t.$teamUrl+/settings._layout.tsx
 msgid "{0}"
 msgstr "{0}"
@@ -1302,11 +1304,6 @@ msgstr "관리자 패널"
 #: packages/lib/constants/document-visibility.ts
 msgid "Admins only"
 msgstr "관리자 전용"
-
-#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-msgid "Advanced Electronic Signature (AES) Required"
-msgstr ""
 
 #: packages/ui/components/recipient/recipient-signature-level-select.tsx
 msgid "Advanced Electronic Signature: Enhanced authentication with 2FA or passkey. Uniquely linked to the signatory and suitable for business contracts."
@@ -4795,10 +4792,6 @@ msgstr ""
 msgid "Failed to send test email."
 msgstr ""
 
-#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-msgid "Failed to sign fields"
-msgstr ""
-
 #: apps/remix/app/components/dialogs/session-logout-all-dialog.tsx
 msgid "Failed to sign out all sessions"
 msgstr "모든 세션에서 로그아웃하지 못했습니다."
@@ -7172,8 +7165,7 @@ msgid "QES (Qualified)"
 msgstr ""
 
 #: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-msgid "Qualified Electronic Signature (QES) Required"
+msgid "Qualified Electronic Signature Applied"
 msgstr ""
 
 #: packages/ui/components/recipient/recipient-signature-level-select.tsx
@@ -7380,6 +7372,10 @@ msgstr "리디렉션 URL"
 #: apps/remix/app/routes/_authenticated+/t.$teamUrl+/documents.$id.edit.tsx
 msgid "Redirecting"
 msgstr "리디렉션 중"
+
+#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
+msgid "Redirecting to Sign8..."
+msgstr ""
 
 #: apps/remix/app/components/general/document-signing/sign8-completion-overlay.tsx
 msgid "Redirecting..."
@@ -8316,10 +8312,13 @@ msgid "Sign Up with OIDC"
 msgstr "OIDC로 가입"
 
 #: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-msgid "Sign8 Authentication Failed"
+msgid "Sign with Sign8 ({signatureLevel})"
 msgstr ""
 
 #: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
+msgid "Sign8 Authentication Failed"
+msgstr ""
+
 #: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
 msgid "Sign8 Error"
 msgstr ""
@@ -8337,6 +8336,7 @@ msgstr ""
 #: apps/remix/app/components/general/document-signing/document-signing-form.tsx
 #: apps/remix/app/components/general/document-signing/document-signing-signature-field.tsx
 #: apps/remix/app/components/general/envelope-editor/envelope-editor-fields-drag-drop.tsx
+#: apps/remix/app/components/general/envelope-signing/envelope-signer-form.tsx
 #: apps/remix/app/components/general/envelope-signing/envelope-signer-form.tsx
 #: apps/remix/app/components/tables/admin-document-recipient-item-table.tsx
 #: apps/remix/app/routes/_internal+/[__htmltopdf]+/certificate.tsx
@@ -8391,6 +8391,10 @@ msgctxt "Signed document (adjective)"
 msgid "Signed"
 msgstr "서명됨"
 
+#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
+msgid "Signed with Sign8"
+msgstr ""
+
 #: apps/remix/app/components/general/envelope-signing/envelope-signer-header.tsx
 msgid "Signer"
 msgstr "서명자"
@@ -8415,7 +8419,6 @@ msgctxt "Recipient role progressive verb"
 msgid "Signing"
 msgstr "서명 중"
 
-#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
 #: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
 msgid "Signing as"
 msgstr ""
@@ -9688,13 +9691,7 @@ msgid "This document is using legacy field insertion, we recommend using the new
 msgstr "이 문서는 기존(레거시) 필드 삽입 방식을 사용하고 있습니다. 더 정확한 결과를 위해 새로운 필드 삽입 방식을 사용하는 것을 권장합니다."
 
 #: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-msgid "This document requires a qualified electronic signature. Click \"Complete\" to be redirected to Sign8 where you will authenticate with your qualified certificate."
-msgstr ""
-
-#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
-msgid "This document requires an advanced electronic signature. Click \"Complete\" to be redirected to Sign8 where you will authenticate securely."
+msgid "This document requires a qualified electronic signature. You will be redirected to Sign8 to authenticate with your qualified certificate and sign the document."
 msgstr ""
 
 #: apps/remix/app/components/general/template/template-page-view-documents-table.tsx
@@ -11832,6 +11829,10 @@ msgstr "이 페이지를 보려면 로그인해야 합니다."
 msgid "You need to setup 2FA to mark this document as viewed."
 msgstr "이 문서를 열람 처리하려면 2단계 인증을 설정해야 합니다."
 
+#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
+msgid "You will be redirected to Sign8 to authenticate with your qualified certificate. After authentication, you will be returned here to complete the signing process."
+msgstr ""
+
 #: apps/remix/app/components/dialogs/admin-organisation-create-dialog.tsx
 msgid "You will need to configure any claims or subscription after creating this organisation"
 msgstr "이 조직을 생성한 후, 클레임 또는 구독을 별도로 구성해야 합니다."
@@ -11934,6 +11935,10 @@ msgstr "문서가 성공적으로 재전송되었습니다."
 #: apps/remix/app/components/general/document/document-edit-form.tsx
 msgid "Your document has been sent successfully."
 msgstr "문서가 성공적으로 발송되었습니다."
+
+#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
+msgid "Your document has been signed with a qualified electronic signature via Sign8. This signature is legally equivalent to a handwritten signature under eIDAS."
+msgstr ""
 
 #: apps/remix/app/components/dialogs/document-duplicate-dialog.tsx
 msgid "Your document has been successfully duplicated."
@@ -12063,6 +12068,10 @@ msgstr "프로필이 업데이트되었습니다."
 #: apps/remix/app/components/forms/public-profile-form.tsx
 msgid "Your public profile has been updated."
 msgstr "공개 프로필이 업데이트되었습니다."
+
+#: apps/remix/app/components/general/document-signing/document-signing-sign8-qes.tsx
+msgid "Your qualified electronic signature has been applied."
+msgstr ""
 
 #: apps/remix/app/components/forms/2fa/recovery-code-list.tsx
 msgid "Your recovery code has been copied to your clipboard."
