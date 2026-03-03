@@ -11,7 +11,7 @@ describe('updateSigningPlaceholder', () => {
       /SubFilter /adbe.pkcs7.detached
       /ByteRange [ 0 /********** /********** /********** ]
       /Contents <0000000000000000000000000000000000000000000000000000000>
-      /Reason (Signed by Documenso)
+      /Reason (Signed with SIGN8)
       /M (D:20210101000000Z)
       >>
       endobj
@@ -36,7 +36,7 @@ describe('updateSigningPlaceholder', () => {
   it('should update the byte range and return it', () => {
     const result = updateSigningPlaceholder({ pdf });
 
-    expect(result.byteRange).toEqual([0, 184, 241, 92]);
+    expect(result.byteRange).toEqual([0, 184, 241, 90]);
   });
 
   it('should only update the last signature in the PDF', () => {
@@ -48,7 +48,7 @@ describe('updateSigningPlaceholder', () => {
       /SubFilter /adbe.pkcs7.detached
       /ByteRange [ 0 /********** /********** /********** ]
       /Contents <0000000000000000000000000000000000000000000000000000000>
-      /Reason (Signed by Documenso)
+      /Reason (Signed with SIGN8)
       /M (D:20210101000000Z)
       >>
       endobj
@@ -59,7 +59,7 @@ describe('updateSigningPlaceholder', () => {
       /SubFilter /adbe.pkcs7.detached
       /ByteRange [ 0 /********** /********** /********** ]
       /Contents <0000000000000000000000000000000000000000000000000000000>
-      /Reason (Signed by Documenso)
+      /Reason (Signed with SIGN8)
       /M (D:20210101000000Z)
       >>
       endobj
@@ -67,6 +67,6 @@ describe('updateSigningPlaceholder', () => {
 
     const result = updateSigningPlaceholder({ pdf });
 
-    expect(result.byteRange).toEqual([0, 512, 569, 92]);
+    expect(result.byteRange).toEqual([0, 510, 567, 90]);
   });
 });
