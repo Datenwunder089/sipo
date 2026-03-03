@@ -116,7 +116,7 @@ export const EnvelopeSigningProvider = ({
   const [email, setEmail] = useState(initialEmail || '');
   const [sign8SignatureData, setSign8SignatureData] = useState<Sign8SignatureData | null>(null);
 
-  // Detect Sign8 callback params to initialize flow state
+  // Detect Sign8 callback params to initialize flow state immediately
   // This prevents the "hopping" visual glitch where the page briefly shows before overlay
   const initialSign8FlowState = useMemo((): Sign8FlowState => {
     const sign8Success = searchParams.get('sign8_success');
@@ -128,7 +128,6 @@ export const EnvelopeSigningProvider = ({
     const hasSignature = sign8Signature !== null;
     const hasSignedPdf = sign8SignedPdf === 'true';
 
-    // If Sign8 callback params are present, start in verifying state
     if (
       sign8Success === 'true' &&
       (hasSignature || hasSignedPdf) &&
@@ -145,6 +144,7 @@ export const EnvelopeSigningProvider = ({
     }
 
     return INITIAL_SIGN8_FLOW_STATE;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [sign8FlowState, setSign8FlowState] = useState<Sign8FlowState>(initialSign8FlowState);

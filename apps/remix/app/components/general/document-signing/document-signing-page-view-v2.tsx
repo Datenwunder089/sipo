@@ -236,7 +236,6 @@ export const DocumentSigningPageViewV2 = () => {
                   customPageRenderer={EnvelopeSignerPageRenderer}
                 />
               ) : sign8FlowState.step !== 'idle' ? (
-                // Show Sign8 overlay when Sign8 flow is active to prevent "No documents" flash
                 <Sign8CompletionOverlay state={sign8FlowState} />
               ) : (
                 <div className="flex flex-col items-center justify-center py-32">

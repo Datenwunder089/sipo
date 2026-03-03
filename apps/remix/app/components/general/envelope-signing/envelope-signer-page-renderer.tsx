@@ -73,7 +73,6 @@ export default function EnvelopeSignerPageRenderer() {
     selectedAssistantRecipientFields,
     selectedAssistantRecipient,
     isDirectTemplate,
-    sign8SignatureData,
   } = useRequiredEnvelopeSigningContext();
 
   const { onFieldSigned, onFieldUnsigned } = useEmbedSigningContext() || {};
@@ -380,7 +379,6 @@ export default function EnvelopeSignerPageRenderer() {
             typedSignatureEnabled: envelope.documentMeta.typedSignatureEnabled,
             uploadSignatureEnabled: envelope.documentMeta.uploadSignatureEnabled,
             drawSignatureEnabled: envelope.documentMeta.drawSignatureEnabled,
-            sign8SignatureData,
           })
             .then(async (payload) => {
               if (payload) {

@@ -408,21 +408,35 @@ const decorateAndSignPdf = async ({
   qesSignedPdfData,
   qesRecipientIds,
 }: DecorateAndSignPdfOptions) => {
-  let pdfDoc: PDFDocument;
-  let fieldsToInsert: typeof envelopeItemFields;
+  // When a QES/AES-signed PDF exists, use it directly WITHOUT modification.
+  // Loading into PDFDocument + save() destroys the embedded CMS signature/certificate.
+  // All visual field appearances were rendered in the sign8.authorize step before signing.
+  if (qesSignedPdfData !== null && qesRecipientIds.length > 0) {
+    console.log('Using QES-signed PDF directly to preserve Sign8 CMS signature/certificate');
 
-  if (qesSignedPdfData !== null) {
-    // QES-PDF as base (contains QES signature + fields rendered before QES signing)
-    pdfDoc = await PDFDocument.load(Buffer.from(qesSignedPdfData, 'base64'));
-    // Only insert fields that are NOT from QES/AES recipients
-    // (their fields are already rendered in the QES-prepared PDF)
-    fieldsToInsert = envelopeItemFields.filter(
-      (f) => f.inserted && !qesRecipientIds.includes(f.recipientId ?? 0),
-    );
-  } else {
+    const pdfBuffer = Buffer.from(qesSignedPdfData, 'base64');
+
+    const { name } = path.parse(envelopeItem.title);
+    const suffix = isRejected ? '_rejected.pdf' : '_signed.pdf';
+
+    const newDocumentData = await putPdfFileServerSide({
+      name: `${name}${suffix}`,
+      type: 'application/pdf',
+      arrayBuffer: async () => Promise.resolve(pdfBuffer),
+    });
+
+    return {
+      oldDocumentDataId: envelopeItem.documentData.id,
+      newDocumentDataId: newDocumentData.id,
+    };
+  }
+
+  let pdfDoc: PDFDocument;
+  const fieldsToInsert = envelopeItemFields;
+
+  {
     const pdfData = await getFileServerSide(envelopeItem.documentData);
     pdfDoc = await PDFDocument.load(pdfData);
-    fieldsToInsert = envelopeItemFields;
   }
 
   // Normalize and flatten layers that could cause issues with the signature
@@ -600,7 +614,16 @@ const decorateAndSignPdf = async ({
   }
 
   // Sign with organization certificate
-  const pdfBuffer = await signPdf({ pdf: Buffer.from(pdfBytes), signatureFields });
+  // Skip org signature when QES/AES recipients have signed - addSigningPlaceholder()
+  // within signPdf() would destroy existing Sign8 signature widgets
+  let pdfBuffer: Buffer;
+
+  if (qesRecipientIds.length > 0 && qesSignedPdfData !== null) {
+    console.log('Skipping org signature - QES/AES PDF already signed, preserving Sign8 widgets');
+    pdfBuffer = Buffer.from(pdfBytes);
+  } else {
+    pdfBuffer = await signPdf({ pdf: Buffer.from(pdfBytes), signatureFields });
+  }
 
   const { name } = path.parse(envelopeItem.title);
 

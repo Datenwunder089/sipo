@@ -24,17 +24,17 @@ import type { Route } from './+types/sign8.authorize';
  *
  * Flow (CAdES detached - documentDigests approach):
  * 1. Get the original PDF
- * 2. Add signing placeholder to PDF (empty signature container)
- * 3. Update placeholder to calculate ByteRange offsets
- * 4. Extract ByteRange content (excluding placeholder) and compute SHA-256 hash
- * 5. Store prepared PDF, hash, and ByteRange in database
- * 6. Redirect to Sign8 OAuth with the hash
- * 7. After callback, call signDoc with documentDigests (not full document)
- * 8. Sign8 returns CMS/PKCS#7 signature (SignatureObject)
- * 9. Embed CMS signature into prepared PDF at placeholder position
+ * 2. Render existing fields from other recipients + current recipient's visual signature
+ * 3. Add signing placeholder to PDF (empty signature container)
+ * 4. Update placeholder to calculate ByteRange offsets
+ * 5. Extract ByteRange content (excluding placeholder) and compute SHA-256 hash
+ * 6. Store prepared PDF, hash, and ByteRange in database
+ * 7. Redirect to Sign8 OAuth with the hash
+ * 8. After callback, call signDoc with documentDigests (not full document)
+ * 9. Sign8 returns CMS/PKCS#7 signature (SignatureObject)
+ * 10. Embed CMS signature into prepared PDF at placeholder position
  */
 export const action = async ({ request }: Route.ActionArgs) => {
-  // Parse form data from POST body
   const formData = await request.formData();
   const token = formData.get('token') as string | null;
   const returnUrl = formData.get('returnUrl') as string | null;
@@ -84,8 +84,6 @@ export const action = async ({ request }: Route.ActionArgs) => {
     return Response.json({ error: 'Recipient not found' }, { status: 404 });
   }
 
-  // Only allow QES and AES signature levels for Sign8 signing
-  // SES (Simple Electronic Signature) does not require Sign8 - it uses local signing
   if (recipient.signatureLevel !== 'QES' && recipient.signatureLevel !== 'AES') {
     return Response.json(
       { error: 'This recipient is not configured for QES or AES signing' },
@@ -132,12 +130,11 @@ export const action = async ({ request }: Route.ActionArgs) => {
       );
     }
 
-    // Prepare fields for visual rendering
-    // Determine if signature is base64 image or text
+    // Build visual "inserted" fields for current recipient's signature fields
+    // Use the drawn/uploaded signature image if available, otherwise fall back to typed name
     const isBase64Signature = signatureParam?.startsWith('data:image/');
     const signatureValue = signatureParam || fullName || recipient.name || 'Digital Signature';
 
-    // Build virtual "inserted" fields for visual rendering
     const fieldsToRender: FieldWithSignature[] = recipient.fields
       .filter((field) => field.type === FieldType.SIGNATURE)
       .map((field) => ({
@@ -149,9 +146,7 @@ export const action = async ({ request }: Route.ActionArgs) => {
           created: new Date(),
           recipientId: recipient.id,
           fieldId: field.id,
-          // Use base64 image if provided, otherwise null
           signatureImageAsBase64: isBase64Signature ? signatureParam : null,
-          // Use typed text if not base64
           typedSignature: isBase64Signature ? null : signatureValue,
           signatureLevel: recipient.signatureLevel,
           sign8SignatureData: null,
@@ -171,15 +166,11 @@ export const action = async ({ request }: Route.ActionArgs) => {
       console.log('Sign8 authorize - PDF with fields size:', pdfBuffer.length, 'bytes');
     }
 
-    // CAdES detached flow: Prepare PDF with signature placeholder
-    // Collect ALL signature field positions for clickable areas
+    // Compute signature field positions for clickable widgets in the PDF
     const signatureFieldsFromRecipient = recipient.fields.filter(
       (f) => f.type === FieldType.SIGNATURE,
     );
 
-    // Convert field positions to PDF coordinates
-    // Note: Field positions are stored as percentages of page size
-    // PDF coordinates are from bottom-left in points
     const signatureFieldPositions: Array<{
       page: number;
       x: number;
@@ -189,43 +180,33 @@ export const action = async ({ request }: Route.ActionArgs) => {
     }> = [];
 
     if (signatureFieldsFromRecipient.length > 0) {
-      // Get PDF page dimensions
       const pdfDoc = await PDFDocument.load(pdfBuffer);
 
       for (const signatureField of signatureFieldsFromRecipient) {
         const page = pdfDoc.getPage(signatureField.page - 1);
         const { width: pageWidth, height: pageHeight } = page.getSize();
 
-        // Convert percentage to PDF points
-        // positionX/Y are percentages (0-100), width/height are also percentages
-        // Convert Decimal types to numbers
         const fieldPosX = Number(signatureField.positionX);
         const fieldPosY = Number(signatureField.positionY);
         const fieldWidth = Number(signatureField.width);
         const fieldHeight = Number(signatureField.height);
 
-        // Skip fields with invalid dimensions
         if (fieldWidth <= 0 || fieldHeight <= 0) {
           continue;
         }
 
         const x = (fieldPosX / 100) * pageWidth;
-        const y = pageHeight - (fieldPosY / 100) * pageHeight - (fieldHeight / 100) * pageHeight; // Flip Y coordinate
+        const y = pageHeight - (fieldPosY / 100) * pageHeight - (fieldHeight / 100) * pageHeight;
         const width = (fieldWidth / 100) * pageWidth;
         const height = (fieldHeight / 100) * pageHeight;
 
-        signatureFieldPositions.push({
-          page: signatureField.page,
-          x,
-          y,
-          width,
-          height,
-        });
+        signatureFieldPositions.push({ page: signatureField.page, x, y, width, height });
       }
 
       console.log('Sign8 authorize - Signature field positions:', signatureFieldPositions);
     }
 
+    // CAdES detached flow: Prepare PDF with signature placeholder
     // Step 1: Add signing placeholder (empty signature container)
     const pdfWithPlaceholder = await addSigningPlaceholder({
       pdf: pdfBuffer,

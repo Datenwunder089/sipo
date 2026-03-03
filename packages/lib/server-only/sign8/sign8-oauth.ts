@@ -528,32 +528,16 @@ export const signDocWithDigests = async (options: {
   // 2. Array of objects with signature property: [{signature: "base64sig"}]
   // 3. Array of objects with Signature property: [{Signature: "base64sig"}]
   if (signData.SignatureObject && signData.SignatureObject.length > 0) {
-    console.log(
-      'Sign8 signDocWithDigests - SignatureObject structure:',
-      JSON.stringify(signData.SignatureObject, null, 2),
-    );
-    console.log(
-      'Sign8 signDocWithDigests - SignatureObject[0] type:',
-      typeof signData.SignatureObject[0],
-    );
-
     const signatures = signData.SignatureObject.map((s) => {
-      // If it's a string directly, return it
       if (typeof s === 'string') {
         return s;
       }
-      // Try different property names (CSC API implementations vary)
       const sig = s.signature || s.Signature || s.signatureValue;
       if (!sig) {
-        console.error(
-          'Sign8 signDocWithDigests - Unknown SignatureObject structure:',
-          JSON.stringify(s),
-        );
         throw new Error(`Unknown SignatureObject structure: ${JSON.stringify(s)}`);
       }
       return sig;
     });
-
     console.log('Sign8 signDocWithDigests - Got', signatures.length, 'signature(s)');
     return { signatures };
   }
