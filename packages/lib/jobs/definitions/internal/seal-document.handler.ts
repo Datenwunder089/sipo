@@ -24,7 +24,7 @@ import { match } from 'ts-pattern';
 
 import { generateCertificatePdf } from '@documenso/lib/server-only/pdf/generate-certificate-pdf';
 import { prisma } from '@documenso/prisma';
-import { signPdf } from '@documenso/signing';
+import { signPdf, signPdfIncremental } from '@documenso/signing';
 import { extractQESSignatures } from '@documenso/signing/helpers/embed-external-signature';
 
 import { NEXT_PRIVATE_USE_PLAYWRIGHT_PDF } from '../../../constants/app';
@@ -40,6 +40,7 @@ import { insertFieldInPDFV1 } from '../../../server-only/pdf/insert-field-in-pdf
 import { insertFieldInPDFV2 } from '../../../server-only/pdf/insert-field-in-pdf-v2';
 import { legacy_insertFieldInPDF } from '../../../server-only/pdf/legacy-insert-field-in-pdf';
 import { normalizeSignatureAppearances } from '../../../server-only/pdf/normalize-signature-appearances';
+import { renderAndAddFieldsIncremental } from '../../../server-only/pdf/render-fields-incremental';
 import { getTeamSettings } from '../../../server-only/team/get-team-settings';
 import { triggerWebhook } from '../../../server-only/webhooks/trigger/trigger-webhook';
 import { DOCUMENT_AUDIT_LOG_TYPE } from '../../../types/document-audit-logs';
@@ -230,12 +231,97 @@ export const run = async ({
         id: true,
         recipientId: true,
         preparedPdfData: true,
+        createdAt: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
       },
     });
 
+    // Warn if any Sign8 recipient is missing their pending signature
+    const missingPending = sign8RecipientIds.filter(
+      (id) => !sign8PendingSignatures.some((sig) => sig.recipientId === id),
+    );
+
+    if (missingPending.length > 0) {
+      console.error(
+        `Sign8 pending signatures missing for recipient IDs: ${missingPending.join(', ')}. ` +
+          'CMS signatures for these recipients will be lost.',
+      );
+    }
+
     // Get the first Sign8-signed PDF if available (there should only be one per document)
-    const qesSignedPdfData =
+    // Note: this may be updated below if fields need to be rendered incrementally
+    let qesSignedPdfData =
       sign8PendingSignatures.length > 0 ? sign8PendingSignatures[0].preparedPdfData : null;
+
+    // Determine if all non-QES/AES recipients signed BEFORE the QES PDF was prepared.
+    // sign8.authorize renders only fields that were inserted at that time.
+    // If any non-QES recipient signed AFTER QES preparation, their visual fields
+    // are NOT in the QES PDF and we must fall back to the normal rendering path.
+    const qesPreparedAt =
+      sign8PendingSignatures.length > 0 ? sign8PendingSignatures[0].createdAt : null;
+
+    let hasUnrenderedFieldsInQesPdf =
+      qesPreparedAt !== null &&
+      envelope.recipients.some(
+        (r) =>
+          r.role !== RecipientRole.CC &&
+          !sign8RecipientIds.includes(r.id) &&
+          r.signingStatus === SigningStatus.SIGNED &&
+          r.signedAt !== null &&
+          r.signedAt > qesPreparedAt,
+      );
+
+    // If SES recipients signed after QES preparation, render their fields incrementally
+    // instead of destroying the QES CMS signature by falling back to PDFDocument.load().
+    if (hasUnrenderedFieldsInQesPdf && qesSignedPdfData !== null) {
+      const unrenderedRecipientIds = envelope.recipients
+        .filter(
+          (r) =>
+            !sign8RecipientIds.includes(r.id) &&
+            r.role !== RecipientRole.CC &&
+            r.signingStatus === SigningStatus.SIGNED &&
+            r.signedAt !== null &&
+            r.signedAt > qesPreparedAt!,
+        )
+        .map((r) => r.id);
+
+      const unrenderedFields = envelope.fields.filter(
+        (f) => f.inserted && unrenderedRecipientIds.includes(f.recipientId),
+      );
+
+      if (unrenderedFields.length > 0) {
+        console.log(
+          'Rendering',
+          unrenderedFields.length,
+          'fields incrementally for recipients who signed after QES preparation',
+        );
+
+        try {
+          const qesPdfBuffer = Buffer.from(qesSignedPdfData, 'base64');
+          const augmentedPdf = await renderAndAddFieldsIncremental(qesPdfBuffer, unrenderedFields);
+
+          // Update the signed PDF data so decorateAndSignPdf uses the
+          // version with all fields visible
+          qesSignedPdfData = augmentedPdf.toString('base64');
+          hasUnrenderedFieldsInQesPdf = false;
+        } catch (error) {
+          console.error(
+            'Failed to render fields incrementally, falling back to normal path:',
+            error,
+          );
+        }
+      } else {
+        hasUnrenderedFieldsInQesPdf = false;
+      }
+    }
+
+    // Skip org SES when ALL non-CC recipients are Sign8 (AES/QES) — their CMS signatures
+    // are already legally binding, and an additional org SES would be redundant.
+    const allRecipientsAreSign8 = recipientsWithoutCCers.every(
+      (r) => r.signatureLevel === SignatureLevel.QES || r.signatureLevel === SignatureLevel.AES,
+    );
 
     for (const envelopeItem of envelopeItems) {
       const envelopeItemFields = envelope.envelopeItems.find(
@@ -253,8 +339,9 @@ export const run = async ({
         isRejected,
         rejectionReason,
         certificateDoc,
-        qesSignedPdfData,
+        qesSignedPdfData: hasUnrenderedFieldsInQesPdf ? null : qesSignedPdfData,
         qesRecipientIds: sign8RecipientIds,
+        skipOrgSes: allRecipientsAreSign8,
       });
 
       newDocumentData.push(result);
@@ -393,6 +480,7 @@ type DecorateAndSignPdfOptions = {
   certificateDoc: PDFDocument | null;
   qesSignedPdfData: string | null;
   qesRecipientIds: number[];
+  skipOrgSes: boolean;
 };
 
 /**
@@ -407,14 +495,79 @@ const decorateAndSignPdf = async ({
   certificateDoc,
   qesSignedPdfData,
   qesRecipientIds,
+  skipOrgSes,
 }: DecorateAndSignPdfOptions) => {
-  // When a QES/AES-signed PDF exists, use it directly WITHOUT modification.
-  // Loading into PDFDocument + save() destroys the embedded CMS signature/certificate.
-  // All visual field appearances were rendered in the sign8.authorize step before signing.
+  // When a QES/AES-signed PDF exists, use it directly (optionally adding org SES).
   if (qesSignedPdfData !== null && qesRecipientIds.length > 0) {
-    console.log('Using QES-signed PDF directly to preserve Sign8 CMS signature/certificate');
+    const qesPdfBuffer = Buffer.from(qesSignedPdfData, 'base64');
 
-    const pdfBuffer = Buffer.from(qesSignedPdfData, 'base64');
+    let finalPdf: Buffer;
+
+    if (skipOrgSes) {
+      // All signers used Sign8 (AES/QES) — no org SES needed
+      console.log('All recipients are Sign8 - using signed PDF without org SES');
+      finalPdf = qesPdfBuffer;
+    } else {
+      // Mixed signers — add org SES incrementally to certify non-Sign8 fields
+      console.log('QES-signed PDF found - adding org SES signature incrementally');
+
+      // Collect signature field positions for non-Sign8 (SES) recipients
+      // so the org SES widget is visible and clickable in Adobe
+      const sesSignatureFields: Array<{
+        page: number;
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      }> = [];
+
+      try {
+        const tempDoc = await PDFDocument.load(qesPdfBuffer);
+        const sesSignatureItemFields = envelopeItemFields.filter(
+          (field) =>
+            (field.type === FieldType.SIGNATURE || field.type === FieldType.FREE_SIGNATURE) &&
+            field.inserted &&
+            !qesRecipientIds.includes(field.recipientId),
+        );
+
+        for (const field of sesSignatureItemFields) {
+          const widthPercent = Number(field.width);
+          const heightPercent = Number(field.height);
+
+          if (widthPercent <= 0 || heightPercent <= 0) {
+            continue;
+          }
+
+          const pageIndex = field.page - 1;
+          if (pageIndex < 0 || pageIndex >= tempDoc.getPageCount()) {
+            continue;
+          }
+
+          const page = tempDoc.getPage(pageIndex);
+          const { width: pageWidth, height: pageHeight } = getPageSize(page);
+
+          const fieldWidth = (widthPercent / 100) * pageWidth;
+          const fieldHeight = (heightPercent / 100) * pageHeight;
+          const fieldX = (Number(field.positionX) / 100) * pageWidth;
+          const fieldY = pageHeight - (Number(field.positionY) / 100) * pageHeight - fieldHeight;
+
+          sesSignatureFields.push({
+            page: field.page,
+            x: fieldX,
+            y: fieldY,
+            width: fieldWidth,
+            height: fieldHeight,
+          });
+        }
+      } catch (error) {
+        console.error('Error collecting SES signature field positions:', error);
+      }
+
+      finalPdf = await signPdfIncremental({
+        pdf: qesPdfBuffer,
+        signatureFields: sesSignatureFields,
+      });
+    }
 
     const { name } = path.parse(envelopeItem.title);
     const suffix = isRejected ? '_rejected.pdf' : '_signed.pdf';
@@ -422,7 +575,7 @@ const decorateAndSignPdf = async ({
     const newDocumentData = await putPdfFileServerSide({
       name: `${name}${suffix}`,
       type: 'application/pdf',
-      arrayBuffer: async () => Promise.resolve(pdfBuffer),
+      arrayBuffer: async () => Promise.resolve(finalPdf),
     });
 
     return {
@@ -614,16 +767,7 @@ const decorateAndSignPdf = async ({
   }
 
   // Sign with organization certificate
-  // Skip org signature when QES/AES recipients have signed - addSigningPlaceholder()
-  // within signPdf() would destroy existing Sign8 signature widgets
-  let pdfBuffer: Buffer;
-
-  if (qesRecipientIds.length > 0 && qesSignedPdfData !== null) {
-    console.log('Skipping org signature - QES/AES PDF already signed, preserving Sign8 widgets');
-    pdfBuffer = Buffer.from(pdfBytes);
-  } else {
-    pdfBuffer = await signPdf({ pdf: Buffer.from(pdfBytes), signatureFields });
-  }
+  const pdfBuffer = await signPdf({ pdf: Buffer.from(pdfBytes), signatureFields });
 
   const { name } = path.parse(envelopeItem.title);
 

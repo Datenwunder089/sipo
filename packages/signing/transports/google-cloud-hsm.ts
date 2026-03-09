@@ -5,6 +5,7 @@ import { signWithGCloud } from '@documenso/pdf-sign';
 
 import type { SignatureFieldPosition } from '../helpers/add-signing-placeholder';
 import { addSigningPlaceholder } from '../helpers/add-signing-placeholder';
+import { addSigningPlaceholderIncremental } from '../helpers/add-signing-placeholder-incremental';
 import { updateSigningPlaceholder } from '../helpers/update-signing-placeholder';
 
 export type SignWithGoogleCloudHSMOptions = {
@@ -12,10 +13,10 @@ export type SignWithGoogleCloudHSMOptions = {
   signatureFields?: SignatureFieldPosition[];
 };
 
-export const signWithGoogleCloudHSM = async ({
-  pdf,
-  signatureFields,
-}: SignWithGoogleCloudHSMOptions) => {
+/**
+ * Ensure GCloud credentials and key path are available. Returns the key path.
+ */
+const ensureGCloudCredentials = (): string => {
   const keyPath = env('NEXT_PRIVATE_SIGNING_GCLOUD_HSM_KEY_PATH');
 
   if (!keyPath) {
@@ -37,34 +38,43 @@ export const signWithGoogleCloudHSM = async ({
     }
   }
 
-  const { pdf: pdfWithPlaceholder, byteRange } = updateSigningPlaceholder({
-    pdf: await addSigningPlaceholder({ pdf, signatureFields }),
-  });
+  return keyPath;
+};
 
+/**
+ * Load the public certificate for GCloud HSM signing.
+ */
+const loadGCloudCert = (): Buffer => {
+  const googleCloudHsmPublicCrtFileContents = env(
+    'NEXT_PRIVATE_SIGNING_GCLOUD_HSM_PUBLIC_CRT_FILE_CONTENTS',
+  );
+
+  if (googleCloudHsmPublicCrtFileContents) {
+    return Buffer.from(googleCloudHsmPublicCrtFileContents, 'base64');
+  }
+
+  return Buffer.from(
+    fs.readFileSync(
+      env('NEXT_PRIVATE_SIGNING_GCLOUD_HSM_PUBLIC_CRT_FILE_PATH') || './example/cert.crt',
+    ),
+  );
+};
+
+/**
+ * Sign the prepared PDF (with placeholder and updated byte range) using GCloud HSM.
+ */
+const signPdfWithGCloudHSM = (
+  pdfWithPlaceholder: Buffer,
+  byteRange: number[],
+  keyPath: string,
+): Buffer => {
   const pdfWithoutSignature = Buffer.concat([
     new Uint8Array(pdfWithPlaceholder.subarray(0, byteRange[1])),
     new Uint8Array(pdfWithPlaceholder.subarray(byteRange[2])),
   ]);
 
   const signatureLength = byteRange[2] - byteRange[1];
-
-  let cert: Buffer | null = null;
-
-  const googleCloudHsmPublicCrtFileContents = env(
-    'NEXT_PRIVATE_SIGNING_GCLOUD_HSM_PUBLIC_CRT_FILE_CONTENTS',
-  );
-
-  if (googleCloudHsmPublicCrtFileContents) {
-    cert = Buffer.from(googleCloudHsmPublicCrtFileContents, 'base64');
-  }
-
-  if (!cert) {
-    cert = Buffer.from(
-      fs.readFileSync(
-        env('NEXT_PRIVATE_SIGNING_GCLOUD_HSM_PUBLIC_CRT_FILE_PATH') || './example/cert.crt',
-      ),
-    );
-  }
+  const cert = loadGCloudCert();
 
   const signature = signWithGCloud({
     keyPath,
@@ -74,11 +84,42 @@ export const signWithGoogleCloudHSM = async ({
 
   const signatureAsHex = signature.toString('hex');
 
-  const signedPdf = Buffer.concat([
+  return Buffer.concat([
     new Uint8Array(pdfWithPlaceholder.subarray(0, byteRange[1])),
     new Uint8Array(Buffer.from(`<${signatureAsHex.padEnd(signatureLength - 2, '0')}>`)),
     new Uint8Array(pdfWithPlaceholder.subarray(byteRange[2])),
   ]);
+};
 
-  return signedPdf;
+/**
+ * Standard signing: rewrites the entire PDF (destroys existing signatures).
+ */
+export const signWithGoogleCloudHSM = async ({
+  pdf,
+  signatureFields,
+}: SignWithGoogleCloudHSMOptions) => {
+  const keyPath = ensureGCloudCredentials();
+
+  const { pdf: pdfWithPlaceholder, byteRange } = updateSigningPlaceholder({
+    pdf: await addSigningPlaceholder({ pdf, signatureFields }),
+  });
+
+  return signPdfWithGCloudHSM(pdfWithPlaceholder, byteRange, keyPath);
+};
+
+/**
+ * Incremental signing: appends signature without modifying existing PDF bytes.
+ * Preserves any existing CMS/PKCS#7 signatures.
+ */
+export const signWithGoogleCloudHSMIncremental = async ({
+  pdf,
+  signatureFields,
+}: SignWithGoogleCloudHSMOptions) => {
+  const keyPath = ensureGCloudCredentials();
+
+  const { pdf: pdfWithPlaceholder, byteRange } = updateSigningPlaceholder({
+    pdf: await addSigningPlaceholderIncremental({ pdf, signatureFields }),
+  });
+
+  return signPdfWithGCloudHSM(pdfWithPlaceholder, byteRange, keyPath);
 };
